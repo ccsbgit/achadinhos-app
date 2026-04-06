@@ -2494,10 +2494,15 @@ async function uploadVideoCloudinary(blob) {
   );
 
   var json;
-  try { json = await resp.json(); } catch(e) { throw new Error('Resposta inválida do Cloudinary.'); }
+  try { json = await resp.json(); } catch(e) { throw new Error('Cloudinary: resposta inválida (status ' + resp.status + ').'); }
 
   if (!resp.ok || json.error) {
-    throw new Error('Cloudinary: ' + (json.error ? json.error.message : resp.status));
+    var msg = json.error ? json.error.message : ('HTTP ' + resp.status);
+    // Dica específica para o erro mais comum: preset sem permissão para vídeo
+    if (resp.status === 400 && msg && msg.toLowerCase().includes('upload preset')) {
+      msg += ' — verifique se o preset suporta resource_type: auto (não apenas image).';
+    }
+    throw new Error('Cloudinary: ' + msg);
   }
 
   return json.secure_url || json.url;
@@ -2509,18 +2514,26 @@ function exportarCardParaDrive(index) {
 
     // Card de vídeo: FFmpeg (se houver texto) → Cloudinary (direto do browser)
     if (card.mediaType === 'video') {
-      if (!card.imagemBase64) { reject(new Error('Vídeo sem dados no card ' + (index + 1))); return; }
+      if (!card.imagemDataUrl) { reject(new Error('Vídeo sem dados no card ' + (index + 1))); return; }
+
+      // Verifica Cloudinary antes de iniciar (falha rápida com mensagem clara)
+      if (!App.cloudinaryCloudName || !App.cloudinaryUploadPreset) {
+        reject(new Error('Cloudinary não configurado. Abra ⚙️ → Cloudinary e preencha Cloud Name e Upload Preset.'));
+        return;
+      }
 
       var hasText = card.canvasObjects && card.canvasObjects.length > 0;
 
       // Se já tiver sido processado e enviado nesta sessão, reutiliza
       if (card.driveUrl && card._videoExportado) { resolve(); return; }
 
-      (hasText
-        ? processarVideoComFFmpeg(index)                              // FFmpeg → Blob MP4
-        : Promise.resolve(new Blob([_b64ToUint8(card.imagemBase64)], // raw → Blob
-            { type: card.mimeType || 'video/mp4' }))
-      )
+      // Obtém o Blob do vídeo: via FFmpeg (se tiver texto) ou nativo fetch(dataUrl)
+      // fetch() é muito mais eficiente que base64→Uint8Array para arquivos grandes
+      var blobPromise = hasText
+        ? processarVideoComFFmpeg(index)
+        : fetch(card.imagemDataUrl).then(function(r) { return r.blob(); });
+
+      blobPromise
         .then(function(blob) { return uploadVideoCloudinary(blob); }) // Cloudinary → URL
         .then(function(url) {
           App.cards[index].driveUrl              = url;
