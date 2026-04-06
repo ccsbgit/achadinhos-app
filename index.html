@@ -2364,90 +2364,127 @@ function exportarOverlayCanvas() {
 }
 
 /**
+ * Renderiza os objetos de texto de um card em um StaticCanvas offscreen e retorna
+ * o PNG transparente (1080×1350) como HTMLImageElement.
+ * NÃO usa App.canvas — é seguro chamar durante o loop de exportação.
+ */
+async function _exportarOverlayOffscreen(card) {
+  return new Promise(function(resolve, reject) {
+    // Canvas offscreen: tamanho igual ao editor (500×625), depois vai exportar com multiplier
+    var el       = document.createElement('canvas');
+    el.width     = 500;
+    el.height    = 625;
+    var offCanvas = new fabric.StaticCanvas(el, { enableRetinaScaling: false });
+
+    fabric.util.enlivenObjects(card.canvasObjects || [], function(objects) {
+      objects.forEach(function(obj) { offCanvas.add(obj); });
+      offCanvas.renderAll();
+
+      // Exporta em 1080×1350 (multiplier 2.16)
+      var dataUrl = offCanvas.toDataURL({ format: 'png', multiplier: 2.16 });
+      offCanvas.dispose();
+
+      var img    = new Image();
+      img.onload  = function() { resolve(img); };
+      img.onerror = function() { reject(new Error('Erro ao carregar overlay.')); };
+      img.src    = dataUrl;
+    });
+  });
+}
+
+/**
  * Processa vídeo com overlay de texto usando Canvas API + MediaRecorder.
  * Não depende de FFmpeg nem de nenhuma biblioteca externa.
- * Retorna Promise<Blob> com o vídeo resultante (WebM).
+ * Retorna Promise<Blob> com o vídeo resultante (WebM — Cloudinary converte para MP4).
  */
 async function processarVideoComCanvas(cardIndex) {
   var card = App.cards[cardIndex];
 
-  // 1. Exporta overlay de texto como PNG transparente
+  // 1. Renderiza o overlay de texto em canvas offscreen (independente do App.canvas)
   document.getElementById('loading-msg').textContent = 'Exportando overlay de texto…';
-  var overlayDataUrl = await exportarOverlayCanvas();
-  var overlayImg     = await _carregarImagem(overlayDataUrl);
+  var overlayImg = await _exportarOverlayOffscreen(card);
 
-  // 2. Cria <video> oculto com o vídeo do card
-  var video       = document.createElement('video');
-  video.muted      = true;
+  // 2. Cria <video> oculto e aguarda metadados
+  var video         = document.createElement('video');
+  video.muted       = true;
   video.playsInline = true;
-  video.preload    = 'auto';
-  video.src        = card.imagemDataUrl;
+  video.preload     = 'auto';
+  video.src         = card.imagemDataUrl;
+  // Anexar ao DOM garante decodificação em todos os browsers
+  video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
+  document.body.appendChild(video);
 
-  await new Promise(function(resolve, reject) {
-    video.addEventListener('loadedmetadata', resolve, { once: true });
-    video.addEventListener('error', function() { reject(new Error('Erro ao carregar vídeo.')); }, { once: true });
-    video.load();
-  });
+  try {
+    await new Promise(function(resolve, reject) {
+      video.addEventListener('loadedmetadata', resolve, { once: true });
+      video.addEventListener('error', function() { reject(new Error('Erro ao carregar vídeo.')); }, { once: true });
+      video.load();
+    });
 
-  // 3. Canvas de saída 1080×1350 (Instagram 4:5)
-  var W = 1080, H = 1350;
-  var cvs   = document.createElement('canvas');
-  cvs.width  = W;
-  cvs.height = H;
-  var ctx = cvs.getContext('2d');
+    // 3. Canvas de saída 1080×1350 (Instagram 4:5)
+    var W = 1080, H = 1350;
+    var cvs   = document.createElement('canvas');
+    cvs.width  = W;
+    cvs.height = H;
+    var ctx = cvs.getContext('2d');
 
-  // 4. Calcula escala "cover" para o vídeo preencher o canvas
-  var vW    = video.videoWidth  || 1080;
-  var vH    = video.videoHeight || 1350;
-  var scale = Math.max(W / vW, H / vH);
-  var dW    = vW * scale;
-  var dH    = vH * scale;
-  var dX    = (W - dW) / 2;
-  var dY    = (H - dH) / 2;
+    // 4. Calcula escala "cover" para o vídeo preencher o canvas
+    var vW    = video.videoWidth  || 1080;
+    var vH    = video.videoHeight || 1350;
+    var scale = Math.max(W / vW, H / vH);
+    var dW    = vW * scale;
+    var dH    = vH * scale;
+    var dX    = (W - dW) / 2;
+    var dY    = (H - dH) / 2;
 
-  // 5. Escolhe o melhor codec WebM suportado pelo browser
-  var mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-    .find(function(m) { return MediaRecorder.isTypeSupported(m); }) || 'video/webm';
+    // 5. Escolhe o melhor codec WebM suportado pelo browser
+    var mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+      .find(function(m) { return MediaRecorder.isTypeSupported(m); }) || 'video/webm';
 
-  var stream   = cvs.captureStream(30);
-  var recorder = new MediaRecorder(stream, { mimeType: mimeType });
-  var chunks   = [];
-  recorder.ondataavailable = function(e) { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    var stream   = cvs.captureStream(30);
+    var recorder = new MediaRecorder(stream, { mimeType: mimeType });
+    var chunks   = [];
+    recorder.ondataavailable = function(e) { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
-  // 6. Loop de renderização frame a frame
-  var stopLoop = false;
-  function drawFrame() {
-    if (stopLoop) return;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
-    ctx.drawImage(video, dX, dY, dW, dH);
-    ctx.drawImage(overlayImg, 0, 0, W, H);
-    requestAnimationFrame(drawFrame);
+    // 6. Loop de renderização frame a frame
+    var stopLoop = false;
+    function drawFrame() {
+      if (stopLoop) return;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(video, dX, dY, dW, dH);
+      ctx.drawImage(overlayImg, 0, 0, W, H);
+      requestAnimationFrame(drawFrame);
+    }
+
+    // 7. Aguarda fim do vídeo → para gravação → retorna Blob
+    return await new Promise(function(resolve, reject) {
+      recorder.onstop = function() {
+        stopLoop = true;
+        resolve(new Blob(chunks, { type: mimeType.split(';')[0] }));
+      };
+
+      video.addEventListener('ended', function() {
+        stopLoop = true;
+        if (recorder.state !== 'inactive') recorder.stop();
+      }, { once: true });
+
+      video.addEventListener('error', function() {
+        stopLoop = true;
+        if (recorder.state !== 'inactive') recorder.stop();
+        reject(new Error('Erro durante reprodução do vídeo.'));
+      }, { once: true });
+
+      recorder.start(100);   // grava em chunks de 100 ms
+      document.getElementById('loading-msg').textContent = 'Processando vídeo com texto…';
+      requestAnimationFrame(drawFrame);
+      video.play().catch(reject);
+    });
+
+  } finally {
+    // Sempre remove o elemento do DOM ao terminar (sucesso ou erro)
+    if (video.parentNode) video.parentNode.removeChild(video);
   }
-
-  // 7. Aguarda fim do vídeo → para gravação → retorna Blob
-  return new Promise(function(resolve, reject) {
-    recorder.onstop = function() {
-      stopLoop = true;
-      resolve(new Blob(chunks, { type: mimeType.split(';')[0] }));
-    };
-
-    video.addEventListener('ended', function() {
-      stopLoop = true;
-      recorder.stop();
-    }, { once: true });
-
-    video.addEventListener('error', function() {
-      stopLoop = true;
-      if (recorder.state !== 'inactive') recorder.stop();
-      reject(new Error('Erro durante reprodução do vídeo.'));
-    }, { once: true });
-
-    recorder.start(100);   // grava em chunks de 100 ms
-    document.getElementById('loading-msg').textContent = 'Processando vídeo com texto…';
-    requestAnimationFrame(drawFrame);
-    video.play().catch(reject);
-  });
 }
 
 /** Carrega uma imagem a partir de uma dataURL/URL. Retorna Promise<HTMLImageElement>. */
@@ -2519,10 +2556,19 @@ function exportarCardParaDrive(index) {
       // Se já tiver sido processado e enviado nesta sessão, reutiliza
       if (card.driveUrl && card._videoExportado) { resolve(); return; }
 
-      // Com texto: Canvas+MediaRecorder processa e retorna Blob → Cloudinary
-      // Sem texto: passa a dataUrl diretamente (Cloudinary aceita data URL como string)
+      // Com texto: Canvas+MediaRecorder gera WebM → Cloudinary → converte para MP4 via URL
+      // Sem texto: passa a dataUrl diretamente (vídeo original, provavelmente já é MP4)
       var uploadPromise = hasText
-        ? processarVideoComCanvas(index).then(function(blob) { return uploadVideoCloudinary(blob); })
+        ? processarVideoComCanvas(index).then(function(blob) {
+            return uploadVideoCloudinary(blob).then(function(url) {
+              // MediaRecorder produz WebM; Instagram exige H.264 MP4.
+              // Cloudinary transcodifica on-the-fly ao inserir f_mp4,vc_h264 na URL.
+              if (url && url.includes('/upload/')) {
+                url = url.replace('/upload/', '/upload/f_mp4,vc_h264/');
+              }
+              return url;
+            });
+          })
         : uploadVideoCloudinary(card.imagemDataUrl);
 
       uploadPromise
@@ -2653,7 +2699,10 @@ function mostrarPreviewCard(index) {
     // Mostra vídeo, esconde imagem
     img.style.display = 'none'; img.src = '';
     if (vid) {
-      vid.src = card.imagemDataUrl || '';
+      // Se já foi exportado (com texto via Cloudinary), exibe a versão final (inclui o overlay)
+      // Caso contrário usa o dataUrl original (apenas para pré-visualização antes do export)
+      var previewSrc = (card._videoExportado && card.driveUrl) ? card.driveUrl : (card.imagemDataUrl || '');
+      vid.src = previewSrc;
       vid.style.display = '';
       vid.load();
     }
