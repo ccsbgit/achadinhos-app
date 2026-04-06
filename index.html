@@ -2329,9 +2329,11 @@ async function _carregarFFmpeg() {
   document.getElementById('loading-msg').textContent = 'Carregando FFmpeg (~26 MB, primeira vez)…';
 
   var createFFmpeg = FFmpeg.createFFmpeg;
+  // Usa a build single-threaded (-st) que não exige SharedArrayBuffer.
+  // GitHub Pages não serve os headers COOP/COEP necessários para a versão multi-thread.
   var ff = createFFmpeg({
     log: false,
-    corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+    corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core-st.js'
   });
   ff.setProgress(function(p) {
     var pct = Math.round(Math.min((p.ratio || 0), 1) * 100);
