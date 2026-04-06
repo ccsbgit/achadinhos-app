@@ -2396,6 +2396,9 @@ async function _exportarOverlayOffscreen(card) {
  * Processa vídeo com overlay de texto usando Canvas API + MediaRecorder.
  * Não depende de FFmpeg nem de nenhuma biblioteca externa.
  * Retorna Promise<Blob> com o vídeo resultante (WebM — Cloudinary converte para MP4).
+ *
+ * IMPORTANTE: a gravação só inicia após o evento 'playing' para evitar frames pretos
+ * no começo (que ocorrem quando rAF dispara antes do primeiro frame decodificado).
  */
 async function processarVideoComCanvas(cardIndex) {
   var card = App.cards[cardIndex];
@@ -2404,31 +2407,34 @@ async function processarVideoComCanvas(cardIndex) {
   document.getElementById('loading-msg').textContent = 'Exportando overlay de texto…';
   var overlayImg = await _exportarOverlayOffscreen(card);
 
-  // 2. Cria <video> oculto e aguarda metadados
+  // 2. Cria <video> visível mas fora da área visível
+  //    width/height reais garantem que o browser decodifique os frames corretamente
   var video         = document.createElement('video');
   video.muted       = true;
   video.playsInline = true;
   video.preload     = 'auto';
+  video.width       = 320;
+  video.height      = 180;
   video.src         = card.imagemDataUrl;
-  // Anexar ao DOM garante decodificação em todos os browsers
-  video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
+  video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none;';
   document.body.appendChild(video);
 
   try {
+    // 3. Aguarda metadados para saber videoWidth/videoHeight
     await new Promise(function(resolve, reject) {
       video.addEventListener('loadedmetadata', resolve, { once: true });
       video.addEventListener('error', function() { reject(new Error('Erro ao carregar vídeo.')); }, { once: true });
       video.load();
     });
 
-    // 3. Canvas de saída 1080×1350 (Instagram 4:5)
+    // 4. Canvas de saída 1080×1350 (Instagram 4:5)
     var W = 1080, H = 1350;
     var cvs   = document.createElement('canvas');
     cvs.width  = W;
     cvs.height = H;
     var ctx = cvs.getContext('2d');
 
-    // 4. Calcula escala "cover" para o vídeo preencher o canvas
+    // 5. Calcula escala "cover" para o vídeo preencher o canvas
     var vW    = video.videoWidth  || 1080;
     var vH    = video.videoHeight || 1350;
     var scale = Math.max(W / vW, H / vH);
@@ -2437,7 +2443,7 @@ async function processarVideoComCanvas(cardIndex) {
     var dX    = (W - dW) / 2;
     var dY    = (H - dH) / 2;
 
-    // 5. Escolhe o melhor codec WebM suportado pelo browser
+    // 6. Escolhe o melhor codec WebM suportado pelo browser
     var mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
       .find(function(m) { return MediaRecorder.isTypeSupported(m); }) || 'video/webm';
 
@@ -2446,18 +2452,19 @@ async function processarVideoComCanvas(cardIndex) {
     var chunks   = [];
     recorder.ondataavailable = function(e) { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
-    // 6. Loop de renderização frame a frame
+    // 7. Loop de renderização frame a frame
     var stopLoop = false;
     function drawFrame() {
       if (stopLoop) return;
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, W, H);
-      ctx.drawImage(video, dX, dY, dW, dH);
-      ctx.drawImage(overlayImg, 0, 0, W, H);
+      ctx.drawImage(video, dX, dY, dW, dH);   // frame real do vídeo
+      ctx.drawImage(overlayImg, 0, 0, W, H);  // texto por cima
       requestAnimationFrame(drawFrame);
     }
 
-    // 7. Aguarda fim do vídeo → para gravação → retorna Blob
+    // 8. Inicia a captura apenas quando o vídeo realmente começa a tocar
+    //    (evento 'playing') — evita frames pretos no início da gravação
     return await new Promise(function(resolve, reject) {
       recorder.onstop = function() {
         stopLoop = true;
@@ -2475,9 +2482,14 @@ async function processarVideoComCanvas(cardIndex) {
         reject(new Error('Erro durante reprodução do vídeo.'));
       }, { once: true });
 
-      recorder.start(100);   // grava em chunks de 100 ms
-      document.getElementById('loading-msg').textContent = 'Processando vídeo com texto…';
-      requestAnimationFrame(drawFrame);
+      // Só inicia MediaRecorder + rAF quando o browser confirma que está tocando
+      video.addEventListener('playing', function() {
+        document.getElementById('loading-msg').textContent = 'Processando vídeo com texto…';
+        recorder.start(100);          // chunks de 100 ms
+        requestAnimationFrame(drawFrame);
+      }, { once: true });
+
+      // Dispara o play — 'playing' virá logo em seguida
       video.play().catch(reject);
     });
 
