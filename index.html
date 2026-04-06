@@ -6,6 +6,8 @@
   <title>Carrossel · Achadinhos</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async></script>
+  <!-- FFmpeg.wasm v0.11 — carregado sob demanda apenas quando há card de vídeo com texto -->
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
   <style>
     /* ========== VARIÁVEIS E RESET ========== */
     :root {
@@ -102,17 +104,9 @@
       position: absolute; top: 0; left: 0;
       width: 100%; height: 100%; object-fit: cover;
     }
-    /* Aviso de vídeo no editor */
-    #editor-video-notice {
-      display: none; flex-direction: column; align-items: center;
-      justify-content: center; gap: 20px;
-      grid-column: 1 / -1; padding: 40px 20px;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); text-align: center;
-    }
-    #editor-video-preview {
-      max-width: 280px; width: 100%; border-radius: 10px;
-      border: 2px solid var(--border);
+    /* Painel de processamento de vídeo no editor */
+    #video-process-panel {
+      grid-column: 1 / -1;
     }
     .card-header-actions { display: none; align-items: center; gap: 4px; }
     .card-header-actions.visivel { display: flex; }
@@ -753,15 +747,12 @@
     </div>
   </div>
 
-  <!-- Aviso para cards de vídeo no editor (substitui canvas + toolbar) -->
-  <div id="editor-video-notice">
-    <video id="editor-video-preview" controls muted playsinline></video>
-    <div>
-      <p style="color:var(--text);font-size:15px;font-weight:700;margin-bottom:6px">🎬 Card de Vídeo</p>
-      <p style="color:var(--muted);font-size:13px;line-height:1.6">
-        Edição de texto sobre vídeo será disponível em breve.<br>
-        Use os botões ◀ ▶ para navegar entre cards.
-      </p>
+  <!-- Painel de vídeo: aparece abaixo do canvas quando o card atual é vídeo -->
+  <div id="video-process-panel" style="display:none;grid-column:1/-1;margin-top:4px">
+    <div style="background:rgba(225,48,108,.07);border:1px solid rgba(225,48,108,.25);border-radius:8px;padding:10px 16px;font-size:12px;color:var(--muted);line-height:1.6">
+      🎬 <strong style="color:var(--text)">Card de vídeo</strong> — o 1º frame aparece acima para posicionar o texto.
+      Ao salvar, o texto será renderizado sobre o vídeo com <strong style="color:var(--text)">FFmpeg</strong>
+      e enviado ao <strong style="color:var(--text)">Cloudinary</strong>. Se não houver texto, o vídeo original é enviado diretamente.
     </div>
   </div>
 
@@ -1034,8 +1025,9 @@
 var App = {
   numCards:      0,
   cards:         [],
-  // card: { index, tipo ('produto'|'capa'|'tela_final'), itemId, nome,
-  //         imagemDataUrl, imagemBase64, mimeType, driveUrl, canvasObjects, imagemExportadaBase64 }
+  // card: { index, tipo ('produto'|'capa'|'tela_final'), mediaType ('imagem'|'video'),
+  //         itemId, nome, imagemDataUrl, imagemBase64, mimeType,
+  //         driveUrl, canvasObjects, imagemExportadaBase64, isFallback, imagemOriginalUrl }
   cardAtivo:     null,   // Tela 1: card ativo para Ctrl+V
   cardEditor:    0,      // Tela 2: card sendo editado
   cardPreview:   0,      // Tela 3: card sendo exibido
@@ -1046,7 +1038,10 @@ var App = {
   produtos:         [],
   t2Iniciado:    false,
   temCapa:       false,
-  temTelaFinal:  false
+  temTelaFinal:  false,
+  // Cloudinary (preenchido em inicializarApp)
+  cloudinaryCloudName:    '',
+  cloudinaryUploadPreset: ''
 };
 
 // ============================================================
@@ -1149,9 +1144,11 @@ function inicializarApp() {
     apiFetch('getConfiguracoes')
   ])
     .then(function(results) {
-      App.produtos      = results[0] || [];
-      var cfg           = results[1] || {};
-      App.legendaPadrao = cfg.legendaPadrao || '';
+      App.produtos                 = results[0] || [];
+      var cfg                      = results[1] || {};
+      App.legendaPadrao            = cfg.legendaPadrao            || '';
+      App.cloudinaryCloudName      = cfg.cloudinaryCloudName      || '';
+      App.cloudinaryUploadPreset   = cfg.cloudinaryUploadPreset   || '';
       hideLoading();
       setupTela1();
       if (App.produtos.length === 0) {
@@ -2178,32 +2175,47 @@ function carregarCardNoEditor(index) {
   document.getElementById('btn-card-prev').disabled = (index === 0);
   document.getElementById('btn-card-next').disabled = (index === App.numCards - 1);
 
-  var canvasWrapper  = document.querySelector('.canvas-wrapper');
-  var toolbar        = document.querySelector('.toolbar');
-  var videoNotice    = document.getElementById('editor-video-notice');
-  var videoPreviewEl = document.getElementById('editor-video-preview');
+  var canvasWrapper = document.querySelector('.canvas-wrapper');
+  var toolbar       = document.querySelector('.toolbar');
+  var vPanel        = document.getElementById('video-process-panel');
 
-  // Card de vídeo: esconde canvas/toolbar e mostra aviso
+  // Garante canvas + toolbar sempre visíveis (vídeo e imagem usam o mesmo editor)
+  if (canvasWrapper) canvasWrapper.style.display = '';
+  if (toolbar)       toolbar.style.display = '';
+
+  // Painel de vídeo: visível só para cards de vídeo
+  if (vPanel) vPanel.style.display = (card.mediaType === 'video') ? 'block' : 'none';
+
+  App.canvas.clear();
+  App.canvas.setBackgroundColor('#000000', function() {});
+
+  // Card de vídeo: extrai primeiro frame e carrega no canvas
   if (card.mediaType === 'video') {
-    if (canvasWrapper) canvasWrapper.style.display = 'none';
-    if (toolbar)       toolbar.style.display = 'none';
-    if (videoNotice)   videoNotice.style.display = 'flex';
-    if (videoPreviewEl && card.imagemDataUrl) {
-      videoPreviewEl.src = card.imagemDataUrl;
-      videoPreviewEl.load();
-    }
-    App.canvas.clear();
-    App.canvas.renderAll();
+    if (!card.imagemDataUrl) { App.canvas.renderAll(); return; }
+    extrairFrameVideo(card.imagemDataUrl)
+      .then(function(frameDataUrl) {
+        // Armazena o frame para referência (não substitui o vídeo original)
+        card._framePreview = frameDataUrl;
+        fabric.Image.fromURL(frameDataUrl, function(img) {
+          var scale = Math.max(500 / img.width, 625 / img.height);
+          img.set({ scaleX: scale, scaleY: scale, left: 250, top: 312, originX: 'center', originY: 'center' });
+          App.canvas.setBackgroundImage(img, function() {
+            if (card.canvasObjects && card.canvasObjects.length > 0) {
+              fabric.util.enlivenObjects(card.canvasObjects, function(objects) {
+                objects.forEach(function(obj) { App.canvas.add(obj); });
+                App.canvas.renderAll();
+              });
+            } else {
+              App.canvas.renderAll();
+            }
+          });
+        });
+      })
+      .catch(function() { App.canvas.renderAll(); });
     return;
   }
 
-  // Card de imagem: garante que canvas/toolbar estejam visíveis
-  if (canvasWrapper) canvasWrapper.style.display = '';
-  if (toolbar)       toolbar.style.display = '';
-  if (videoNotice)   videoNotice.style.display = 'none';
-  if (videoPreviewEl) { videoPreviewEl.src = ''; }
-
-  App.canvas.clear();
+  // Card de imagem: fluxo normal
   App.canvas.setBackgroundColor('#000000', function() {});
 
   if (!card.imagemDataUrl) { App.canvas.renderAll(); return; }
@@ -2291,20 +2303,229 @@ async function salvarEContinuar() {
   irParaTela3();
 }
 
+// ============================================================
+//  VÍDEO — Frame extraction, FFmpeg.wasm, Cloudinary upload
+// ============================================================
+
+/** Estado singleton do FFmpeg */
+var FFmpegState = { instancia: null, carregado: false, carregando: false };
+
+/**
+ * Carrega FFmpeg.wasm (lazy — só na primeira chamada que precisar).
+ * O core (~26 MB) é baixado do unpkg CDN na primeira vez.
+ */
+async function _carregarFFmpeg() {
+  if (FFmpegState.carregado) return FFmpegState.instancia;
+  if (FFmpegState.carregando) {
+    // Aguarda até estar pronto (outra chamada já está carregando)
+    await new Promise(function(resolve) {
+      var chk = setInterval(function() {
+        if (FFmpegState.carregado || !FFmpegState.carregando) { clearInterval(chk); resolve(); }
+      }, 300);
+    });
+    return FFmpegState.instancia;
+  }
+  FFmpegState.carregando = true;
+  document.getElementById('loading-msg').textContent = 'Carregando FFmpeg (~26 MB, primeira vez)…';
+
+  var createFFmpeg = FFmpeg.createFFmpeg;
+  var ff = createFFmpeg({
+    log: false,
+    corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+  });
+  ff.setProgress(function(p) {
+    var pct = Math.round(Math.min((p.ratio || 0), 1) * 100);
+    document.getElementById('loading-msg').textContent = 'Processando vídeo… ' + pct + '%';
+  });
+  await ff.load();
+  FFmpegState.instancia  = ff;
+  FFmpegState.carregado  = true;
+  FFmpegState.carregando = false;
+  return ff;
+}
+
+/** Converte base64 para Uint8Array (necessário para gravar no FS do FFmpeg). */
+function _b64ToUint8(b64) {
+  var raw = atob(b64);
+  var out = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Extrai o primeiro frame de um vídeo como dataURL JPEG.
+ * Usa um <video> temporário + <canvas> para capturar o frame.
+ */
+function extrairFrameVideo(videoDataUrl) {
+  return new Promise(function(resolve, reject) {
+    var v       = document.createElement('video');
+    v.muted     = true;
+    v.playsInline = true;
+    v.preload   = 'auto';
+    v.src       = videoDataUrl;
+    v.currentTime = 0.1;
+
+    v.addEventListener('seeked', function handler() {
+      v.removeEventListener('seeked', handler);
+      try {
+        var c   = document.createElement('canvas');
+        c.width  = v.videoWidth  || 500;
+        c.height = v.videoHeight || 625;
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        v.src = '';          // libera memória
+        resolve(c.toDataURL('image/jpeg', 0.85));
+      } catch(e) { reject(e); }
+    }, { once: true });
+
+    v.addEventListener('error', function() {
+      reject(new Error('Não foi possível extrair o frame do vídeo.'));
+    }, { once: true });
+
+    v.load();
+  });
+}
+
+/**
+ * Exporta apenas os objetos de texto do canvas como PNG transparente.
+ * Remove o background temporariamente e restaura depois.
+ */
+function exportarOverlayCanvas() {
+  return new Promise(function(resolve) {
+    var bgImg   = App.canvas.backgroundImage;
+    var bgColor = App.canvas.backgroundColor;
+
+    App.canvas.backgroundImage = null;
+    App.canvas.setBackgroundColor('', function() {
+      App.canvas.renderAll();
+      var dataUrl = App.canvas.toDataURL({ format: 'png', multiplier: 2.16 });
+
+      // Restaura
+      App.canvas.backgroundImage = bgImg;
+      App.canvas.setBackgroundColor(bgColor || '#000000', function() {
+        App.canvas.renderAll();
+      });
+      resolve(dataUrl);
+    });
+  });
+}
+
+/**
+ * Processa vídeo com FFmpeg:
+ *   — Se houver objetos de texto: escala para 1080×1350 + overlay PNG transparente
+ *   — Se não houver texto: apenas escala para 1080×1350 (formato 4:5 Instagram)
+ * Retorna um Blob do vídeo processado (H.264, MP4).
+ */
+async function processarVideoComFFmpeg(cardIndex) {
+  var card = App.cards[cardIndex];
+  var ff   = await _carregarFFmpeg();
+
+  var ext     = (card.mimeType || 'video/mp4').replace('video/', '').split(';')[0] || 'mp4';
+  var inputFn = 'vin.' + ext;
+
+  document.getElementById('loading-msg').textContent = 'Preparando vídeo…';
+  ff.FS('writeFile', inputFn, _b64ToUint8(card.imagemBase64));
+
+  var hasText = card.canvasObjects && card.canvasObjects.length > 0;
+  var filter;
+
+  if (hasText) {
+    document.getElementById('loading-msg').textContent = 'Exportando overlay de texto…';
+    var overlayDataUrl = await exportarOverlayCanvas();
+    var overlayB64     = overlayDataUrl.split(',')[1];
+    ff.FS('writeFile', 'ov.png', _b64ToUint8(overlayB64));
+
+    // Escala + overlay transparente
+    filter = '[0:v]scale=1080:1350:force_original_aspect_ratio=increase,' +
+             'crop=1080:1350[sv];[sv][1:v]overlay=0:0[vout]';
+
+    document.getElementById('loading-msg').textContent = 'Processando vídeo… 0%';
+    await ff.run(
+      '-i', inputFn, '-i', 'ov.png',
+      '-filter_complex', filter,
+      '-map', '[vout]', '-map', '0:a?',
+      '-c:a', 'copy', '-c:v', 'libx264',
+      '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+      'vout.mp4'
+    );
+    try { ff.FS('unlink', 'ov.png'); } catch(e2) {}
+  } else {
+    // Apenas reescala
+    filter = '[0:v]scale=1080:1350:force_original_aspect_ratio=increase,crop=1080:1350[vout]';
+    document.getElementById('loading-msg').textContent = 'Reescalando vídeo… 0%';
+    await ff.run(
+      '-i', inputFn,
+      '-filter_complex', filter,
+      '-map', '[vout]', '-map', '0:a?',
+      '-c:a', 'copy', '-c:v', 'libx264',
+      '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+      'vout.mp4'
+    );
+  }
+
+  document.getElementById('loading-msg').textContent = 'Finalizando…';
+  var data = ff.FS('readFile', 'vout.mp4');
+  try { ff.FS('unlink', inputFn); ff.FS('unlink', 'vout.mp4'); } catch(e3) {}
+
+  return new Blob([data.buffer], { type: 'video/mp4' });
+}
+
+/**
+ * Envia um vídeo (Blob) diretamente para o Cloudinary (sem passar pelo GAS).
+ * Usa o endpoint /auto/upload que aceita imagem e vídeo no mesmo preset.
+ * Retorna a URL pública segura (HTTPS).
+ */
+async function uploadVideoCloudinary(blob) {
+  var cloudName    = App.cloudinaryCloudName;
+  var uploadPreset = App.cloudinaryUploadPreset;
+
+  if (!cloudName || !uploadPreset) {
+    throw new Error('Cloudinary não configurado. Acesse ⚙️ Configurações → Cloudinary.');
+  }
+
+  document.getElementById('loading-msg').textContent = 'Enviando vídeo para Cloudinary…';
+
+  var form = new FormData();
+  form.append('file',          blob);
+  form.append('upload_preset', uploadPreset);
+
+  var resp = await fetch(
+    'https://api.cloudinary.com/v1_1/' + cloudName + '/auto/upload',
+    { method: 'POST', body: form }
+  );
+
+  var json;
+  try { json = await resp.json(); } catch(e) { throw new Error('Resposta inválida do Cloudinary.'); }
+
+  if (!resp.ok || json.error) {
+    throw new Error('Cloudinary: ' + (json.error ? json.error.message : resp.status));
+  }
+
+  return json.secure_url || json.url;
+}
+
 function exportarCardParaDrive(index) {
   return new Promise(function(resolve, reject) {
     var card = App.cards[index];
 
-    // Card de vídeo: faz upload direto, sem canvas
+    // Card de vídeo: FFmpeg (se houver texto) → Cloudinary (direto do browser)
     if (card.mediaType === 'video') {
       if (!card.imagemBase64) { reject(new Error('Vídeo sem dados no card ' + (index + 1))); return; }
-      var ext  = (card.mimeType || 'video/mp4').replace('video/', '') || 'mp4';
-      var nome = 'carrossel-video-card-' + (index + 1) + '-' + Date.now() + '.' + ext;
-      apiFetch('uploadImagemBase64', { base64Data: card.imagemBase64, mimeType: card.mimeType, nomeArquivo: nome })
-        .then(function(res) {
-          if (!res || !res.sucesso) throw new Error((res && res.erro) || 'Falha no upload do vídeo');
-          App.cards[index].driveUrl              = res.url;
-          App.cards[index].imagemExportadaBase64 = null; // vídeos não têm export canvas
+
+      var hasText = card.canvasObjects && card.canvasObjects.length > 0;
+
+      // Se já tiver sido processado e enviado nesta sessão, reutiliza
+      if (card.driveUrl && card._videoExportado) { resolve(); return; }
+
+      (hasText
+        ? processarVideoComFFmpeg(index)                              // FFmpeg → Blob MP4
+        : Promise.resolve(new Blob([_b64ToUint8(card.imagemBase64)], // raw → Blob
+            { type: card.mimeType || 'video/mp4' }))
+      )
+        .then(function(blob) { return uploadVideoCloudinary(blob); }) // Cloudinary → URL
+        .then(function(url) {
+          App.cards[index].driveUrl              = url;
+          App.cards[index]._videoExportado       = true;
+          App.cards[index].imagemExportadaBase64 = null;
           resolve();
         })
         .catch(reject);
@@ -3079,6 +3300,8 @@ document.getElementById('btn-salvar-config').addEventListener('click', async fun
     if (uploadPreset) config.CLOUDINARY_UPLOAD_PRESET   = uploadPreset;
     await apiFetch('salvarConfiguracoes', { config: config });
     App.legendaPadrao = legendaPad; // atualiza estado local
+    if (cloudName)    App.cloudinaryCloudName    = cloudName;
+    if (uploadPreset) App.cloudinaryUploadPreset = uploadPreset;
     hideLoading();
     showToast('Configurações salvas!', 'success');
     document.getElementById('modal-config').classList.remove('aberto');
