@@ -1778,6 +1778,11 @@ function inicializarEditor() {
     App._editorListenersOk = true;
   }
 
+  // Garante que o botão nunca fique preso em "Processando" entre sessões
+  var btnSalvar = document.getElementById('btn-salvar-continuar');
+  btnSalvar.disabled = false;
+  btnSalvar.textContent = 'Salvar e Continuar →';
+
   document.getElementById('textarea-legenda').value = App.legenda || App.legendaPadrao || '';
 
   App.cardEditor = 0;
