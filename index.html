@@ -2514,7 +2514,13 @@ function _carregarImagem(src) {
  * Usa o endpoint /auto/upload que aceita imagem e vídeo no mesmo preset.
  * Retorna a URL pública segura (HTTPS).
  */
-async function uploadVideoCloudinary(blob) {
+/**
+ * Envia um vídeo para o Cloudinary.
+ * @param {Blob|string} blob     - Blob WebM (com texto) ou dataUrl string (sem texto)
+ * @param {boolean}     needsMp4 - true = blob é WebM e precisa de conversão eager para H.264 MP4
+ * Retorna a URL HTTPS do vídeo final (já em MP4 quando needsMp4=true).
+ */
+async function uploadVideoCloudinary(blob, needsMp4) {
   var cloudName    = (App.cloudinaryCloudName    || '').trim();
   var uploadPreset = (App.cloudinaryUploadPreset || '').trim();
 
@@ -2524,10 +2530,17 @@ async function uploadVideoCloudinary(blob) {
 
   document.getElementById('loading-msg').textContent = 'Enviando vídeo para Cloudinary…';
 
-  // Aceita tanto Blob (saída do Canvas+MediaRecorder) quanto dataUrl string (vídeo sem edição)
   var form = new FormData();
-  form.append('file',          blob);   // Cloudinary aceita Blob e data URL string
+  form.append('file',          blob);
   form.append('upload_preset', uploadPreset);
+
+  if (needsMp4) {
+    // Pede conversão síncrona para H.264 MP4 durante o upload.
+    // O Instagram exige MP4/H.264; WebM não é aceito.
+    // eager_async=false = aguarda a transcodificação antes de retornar.
+    form.append('eager',        'f_mp4,vc_h264');
+    form.append('eager_async',  'false');
+  }
 
   var resp = await fetch(
     'https://api.cloudinary.com/v1_1/' + cloudName + '/auto/upload',
@@ -2539,11 +2552,15 @@ async function uploadVideoCloudinary(blob) {
 
   if (!resp.ok || json.error) {
     var msg = json.error ? json.error.message : ('HTTP ' + resp.status);
-    // Dica específica para o erro mais comum: preset sem permissão para vídeo
     if (resp.status === 400 && msg && msg.toLowerCase().includes('upload preset')) {
       msg += ' — verifique se o preset suporta resource_type: auto (não apenas image).';
     }
     throw new Error('Cloudinary: ' + msg);
+  }
+
+  // Se pediu eager, usa a URL já transcodificada (MP4/H.264 pronto)
+  if (needsMp4 && json.eager && json.eager[0]) {
+    return json.eager[0].secure_url || json.eager[0].url;
   }
 
   return json.secure_url || json.url;
@@ -2568,20 +2585,14 @@ function exportarCardParaDrive(index) {
       // Se já tiver sido processado e enviado nesta sessão, reutiliza
       if (card.driveUrl && card._videoExportado) { resolve(); return; }
 
-      // Com texto: Canvas+MediaRecorder gera WebM → Cloudinary → converte para MP4 via URL
-      // Sem texto: passa a dataUrl diretamente (vídeo original, provavelmente já é MP4)
+      // Com texto: Canvas+MediaRecorder gera WebM → Cloudinary converte para H.264 MP4 (eager síncrono)
+      // Sem texto: vídeo original enviado direto (provavelmente já é MP4)
       var uploadPromise = hasText
         ? processarVideoComCanvas(index).then(function(blob) {
-            return uploadVideoCloudinary(blob).then(function(url) {
-              // MediaRecorder produz WebM; Instagram exige H.264 MP4.
-              // Cloudinary transcodifica on-the-fly ao inserir f_mp4,vc_h264 na URL.
-              if (url && url.includes('/upload/')) {
-                url = url.replace('/upload/', '/upload/f_mp4,vc_h264/');
-              }
-              return url;
-            });
+            // needsMp4=true: Cloudinary transcodifica durante o upload e devolve URL MP4 pronta
+            return uploadVideoCloudinary(blob, true);
           })
-        : uploadVideoCloudinary(card.imagemDataUrl);
+        : uploadVideoCloudinary(card.imagemDataUrl, false);
 
       uploadPromise
         .then(function(url) {
