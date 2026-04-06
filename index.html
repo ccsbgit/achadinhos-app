@@ -2557,7 +2557,12 @@ async function uploadVideoCloudinary(blob, needsMp4) {
   // O preset unsigned não permite eager_async. Alternativa: inserir a transformação
   // na URL e aguardar (polling) até o Cloudinary terminar de transcodificar.
   // Cloudinary transcodifica lazy na 1ª requisição e armazena em cache.
+  // Insere a transformação na URL E troca a extensão para .mp4
+  // O Cloudinary usa a extensão da URL para definir o formato de entrega —
+  // sem trocar a extensão, ele pode servir WebM mesmo com f_mp4 na transformação,
+  // e o Instagram rejeita qualquer URL que não termine em .mp4
   var mp4Url = baseUrl.replace('/upload/', '/upload/f_mp4,vc_h264/');
+  mp4Url = mp4Url.replace(/\.[a-zA-Z0-9]+$/, '.mp4');
 
   document.getElementById('loading-msg').textContent = 'Aguardando conversão para MP4…';
   await _aguardarUrlPronta(mp4Url, 30, 2000);  // até 30 tentativas, 2 s entre cada
