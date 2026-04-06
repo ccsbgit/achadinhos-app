@@ -6,8 +6,8 @@
   <title>Carrossel · Achadinhos</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async></script>
-  <!-- FFmpeg.wasm v0.11 — carregado sob demanda apenas quando há card de vídeo com texto -->
-  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <!-- FFmpeg.wasm v0.12 (single-thread, sem SharedArrayBuffer) — carregado sob demanda -->
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/umd/ffmpeg.js"></script>
   <style>
     /* ========== VARIÁVEIS E RESET ========== */
     :root {
@@ -2311,13 +2311,13 @@ async function salvarEContinuar() {
 var FFmpegState = { instancia: null, carregado: false, carregando: false };
 
 /**
- * Carrega FFmpeg.wasm (lazy — só na primeira chamada que precisar).
+ * Carrega FFmpeg.wasm v0.12 (lazy — só na primeira chamada que precisar).
+ * Usa @ffmpeg/core (não -mt) que é single-threaded e não exige SharedArrayBuffer.
  * O core (~26 MB) é baixado do unpkg CDN na primeira vez.
  */
 async function _carregarFFmpeg() {
   if (FFmpegState.carregado) return FFmpegState.instancia;
   if (FFmpegState.carregando) {
-    // Aguarda até estar pronto (outra chamada já está carregando)
     await new Promise(function(resolve) {
       var chk = setInterval(function() {
         if (FFmpegState.carregado || !FFmpegState.carregando) { clearInterval(chk); resolve(); }
@@ -2328,18 +2328,23 @@ async function _carregarFFmpeg() {
   FFmpegState.carregando = true;
   document.getElementById('loading-msg').textContent = 'Carregando FFmpeg (~26 MB, primeira vez)…';
 
-  var createFFmpeg = FFmpeg.createFFmpeg;
-  // Usa o pacote @ffmpeg/core-st (single-threaded) que não exige SharedArrayBuffer.
-  // GitHub Pages não serve headers COOP/COEP necessários para a versão multi-thread.
-  var ff = createFFmpeg({
-    log: false,
-    corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js'
+  // v0.12 API: FFmpegWASM é o namespace UMD exportado pelo script
+  var ff = new FFmpegWASM.FFmpeg();
+
+  ff.on('log', function(e) {
+    if (e.type === 'fferr') console.warn('[FFmpeg]', e.message);
   });
-  ff.setProgress(function(p) {
-    var pct = Math.round(Math.min((p.ratio || 0), 1) * 100);
+  ff.on('progress', function(e) {
+    var pct = Math.round(Math.min((e.progress || 0), 1) * 100);
     document.getElementById('loading-msg').textContent = 'Processando vídeo… ' + pct + '%';
   });
-  await ff.load();
+
+  // @ffmpeg/core (sem -mt) = single-threaded, sem SharedArrayBuffer
+  await ff.load({
+    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
+  });
+
   FFmpegState.instancia  = ff;
   FFmpegState.carregado  = true;
   FFmpegState.carregando = false;
@@ -2425,48 +2430,47 @@ async function processarVideoComFFmpeg(cardIndex) {
   var inputFn = 'vin.' + ext;
 
   document.getElementById('loading-msg').textContent = 'Preparando vídeo…';
-  ff.FS('writeFile', inputFn, _b64ToUint8(card.imagemBase64));
+  // v0.12 API: await ff.writeFile() em vez de ff.FS('writeFile')
+  await ff.writeFile(inputFn, _b64ToUint8(card.imagemBase64));
 
   var hasText = card.canvasObjects && card.canvasObjects.length > 0;
-  var filter;
 
   if (hasText) {
     document.getElementById('loading-msg').textContent = 'Exportando overlay de texto…';
     var overlayDataUrl = await exportarOverlayCanvas();
     var overlayB64     = overlayDataUrl.split(',')[1];
-    ff.FS('writeFile', 'ov.png', _b64ToUint8(overlayB64));
-
-    // Escala + overlay transparente
-    filter = '[0:v]scale=1080:1350:force_original_aspect_ratio=increase,' +
-             'crop=1080:1350[sv];[sv][1:v]overlay=0:0[vout]';
+    await ff.writeFile('ov.png', _b64ToUint8(overlayB64));
 
     document.getElementById('loading-msg').textContent = 'Processando vídeo… 0%';
-    await ff.run(
+    // v0.12 API: ff.exec([array de argumentos]) em vez de ff.run(...args)
+    await ff.exec([
       '-i', inputFn, '-i', 'ov.png',
-      '-filter_complex', filter,
+      '-filter_complex',
+        '[0:v]scale=1080:1350:force_original_aspect_ratio=increase,' +
+        'crop=1080:1350[sv];[sv][1:v]overlay=0:0[vout]',
       '-map', '[vout]', '-map', '0:a?',
       '-c:a', 'copy', '-c:v', 'libx264',
       '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
       'vout.mp4'
-    );
-    try { ff.FS('unlink', 'ov.png'); } catch(e2) {}
+    ]);
+    try { await ff.deleteFile('ov.png'); } catch(e2) {}
   } else {
-    // Apenas reescala
-    filter = '[0:v]scale=1080:1350:force_original_aspect_ratio=increase,crop=1080:1350[vout]';
     document.getElementById('loading-msg').textContent = 'Reescalando vídeo… 0%';
-    await ff.run(
+    await ff.exec([
       '-i', inputFn,
-      '-filter_complex', filter,
+      '-filter_complex',
+        '[0:v]scale=1080:1350:force_original_aspect_ratio=increase,crop=1080:1350[vout]',
       '-map', '[vout]', '-map', '0:a?',
       '-c:a', 'copy', '-c:v', 'libx264',
       '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
       'vout.mp4'
-    );
+    ]);
   }
 
   document.getElementById('loading-msg').textContent = 'Finalizando…';
-  var data = ff.FS('readFile', 'vout.mp4');
-  try { ff.FS('unlink', inputFn); ff.FS('unlink', 'vout.mp4'); } catch(e3) {}
+  // v0.12 API: await ff.readFile() retorna Uint8Array
+  var data = await ff.readFile('vout.mp4');
+  try { await ff.deleteFile(inputFn); await ff.deleteFile('vout.mp4'); } catch(e3) {}
 
   return new Blob([data.buffer], { type: 'video/mp4' });
 }
