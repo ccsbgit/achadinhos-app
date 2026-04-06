@@ -2329,11 +2329,11 @@ async function _carregarFFmpeg() {
   document.getElementById('loading-msg').textContent = 'Carregando FFmpeg (~26 MB, primeira vez)…';
 
   var createFFmpeg = FFmpeg.createFFmpeg;
-  // Usa a build single-threaded (-st) que não exige SharedArrayBuffer.
-  // GitHub Pages não serve os headers COOP/COEP necessários para a versão multi-thread.
+  // Usa o pacote @ffmpeg/core-st (single-threaded) que não exige SharedArrayBuffer.
+  // GitHub Pages não serve headers COOP/COEP necessários para a versão multi-thread.
   var ff = createFFmpeg({
     log: false,
-    corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core-st.js'
+    corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js'
   });
   ff.setProgress(function(p) {
     var pct = Math.round(Math.min((p.ratio || 0), 1) * 100);
@@ -2477,17 +2477,18 @@ async function processarVideoComFFmpeg(cardIndex) {
  * Retorna a URL pública segura (HTTPS).
  */
 async function uploadVideoCloudinary(blob) {
-  var cloudName    = App.cloudinaryCloudName;
-  var uploadPreset = App.cloudinaryUploadPreset;
+  var cloudName    = (App.cloudinaryCloudName    || '').trim();
+  var uploadPreset = (App.cloudinaryUploadPreset || '').trim();
 
   if (!cloudName || !uploadPreset) {
-    throw new Error('Cloudinary não configurado. Acesse ⚙️ Configurações → Cloudinary.');
+    throw new Error('Cloudinary não configurado. Acesse ⚙️ Configurações → Cloudinary e preencha Cloud Name e Upload Preset.');
   }
 
   document.getElementById('loading-msg').textContent = 'Enviando vídeo para Cloudinary…';
 
+  // Aceita tanto Blob (saída do FFmpeg) quanto dataUrl string (vídeo sem edição)
   var form = new FormData();
-  form.append('file',          blob);
+  form.append('file',          blob);   // Cloudinary aceita Blob e data URL string
   form.append('upload_preset', uploadPreset);
 
   var resp = await fetch(
@@ -2531,12 +2532,13 @@ function exportarCardParaDrive(index) {
 
       // Obtém o Blob do vídeo: via FFmpeg (se tiver texto) ou nativo fetch(dataUrl)
       // fetch() é muito mais eficiente que base64→Uint8Array para arquivos grandes
-      var blobPromise = hasText
-        ? processarVideoComFFmpeg(index)
-        : fetch(card.imagemDataUrl).then(function(r) { return r.blob(); });
+      // Com texto: FFmpeg processa e retorna Blob
+      // Sem texto: passa a dataUrl diretamente (Cloudinary aceita data URL como string)
+      var uploadPromise = hasText
+        ? processarVideoComFFmpeg(index).then(function(blob) { return uploadVideoCloudinary(blob); })
+        : uploadVideoCloudinary(card.imagemDataUrl);
 
-      blobPromise
-        .then(function(blob) { return uploadVideoCloudinary(blob); }) // Cloudinary → URL
+      uploadPromise
         .then(function(url) {
           App.cards[index].driveUrl              = url;
           App.cards[index]._videoExportado       = true;
