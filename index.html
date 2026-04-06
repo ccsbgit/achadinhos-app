@@ -2443,9 +2443,20 @@ async function processarVideoComCanvas(cardIndex) {
     var dX    = (W - dW) / 2;
     var dY    = (H - dH) / 2;
 
-    // 6. Escolhe o melhor codec WebM suportado pelo browser
-    var mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-      .find(function(m) { return MediaRecorder.isTypeSupported(m); }) || 'video/webm';
+    // 6. Escolhe o melhor formato suportado pelo browser.
+    //    Prioriza MP4/H.264 nativo (Chrome 130+ no Mac/Windows) — o Instagram aceita direto,
+    //    sem precisar de nenhuma conversão no Cloudinary.
+    //    WebM é o fallback para browsers mais antigos.
+    var mimeType = [
+      'video/mp4;codecs=avc1',   // Chrome 130+ Mac/Windows — H.264 nativo
+      'video/mp4;codecs=h264',
+      'video/mp4',
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm'
+    ].find(function(m) { return MediaRecorder.isTypeSupported(m); }) || 'video/webm';
+
+    var isNativeMp4 = mimeType.startsWith('video/mp4');
 
     var stream   = cvs.captureStream(30);
     var recorder = new MediaRecorder(stream, { mimeType: mimeType });
@@ -2468,7 +2479,9 @@ async function processarVideoComCanvas(cardIndex) {
     return await new Promise(function(resolve, reject) {
       recorder.onstop = function() {
         stopLoop = true;
-        resolve(new Blob(chunks, { type: mimeType.split(';')[0] }));
+        var blob = new Blob(chunks, { type: mimeType.split(';')[0] });
+        // Retorna objeto com blob E flag indicando se já é MP4 nativo
+        resolve({ blob: blob, isNativeMp4: isNativeMp4 });
       };
 
       video.addEventListener('ended', function() {
@@ -2583,7 +2596,9 @@ async function _aguardarUrlPronta(url, maxTries, intervalo) {
       var r = await fetch(url, { method: 'HEAD' });
       if (r.ok) {
         var ct = r.headers.get('content-type') || '';
-        if (ct.startsWith('video/')) return;  // pronto!
+        // Verifica especificamente MP4 — 'video/webm' também começa com 'video/'
+        // e causaria falso positivo (a conversão ainda não ocorreu)
+        if (ct.includes('mp4') || ct.includes('mpeg')) return;  // pronto!
       }
     } catch(e) { /* rede instável, tenta de novo */ }
 
@@ -2615,12 +2630,13 @@ function exportarCardParaDrive(index) {
       // Se já tiver sido processado e enviado nesta sessão, reutiliza
       if (card.driveUrl && card._videoExportado) { resolve(); return; }
 
-      // Com texto: Canvas+MediaRecorder gera WebM → Cloudinary converte para H.264 MP4 (eager síncrono)
+      // Com texto: Canvas+MediaRecorder → Cloudinary
+      //   - Se o browser gravou MP4 nativo: sobe direto, sem conversão (needsMp4=false)
+      //   - Se gravou WebM: Cloudinary converte lazy para MP4 com polling (needsMp4=true)
       // Sem texto: vídeo original enviado direto (provavelmente já é MP4)
       var uploadPromise = hasText
-        ? processarVideoComCanvas(index).then(function(blob) {
-            // needsMp4=true: Cloudinary transcodifica durante o upload e devolve URL MP4 pronta
-            return uploadVideoCloudinary(blob, true);
+        ? processarVideoComCanvas(index).then(function(result) {
+            return uploadVideoCloudinary(result.blob, !result.isNativeMp4);
           })
         : uploadVideoCloudinary(card.imagemDataUrl, false);
 
