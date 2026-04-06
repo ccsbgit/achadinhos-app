@@ -1,0 +1,8 @@
+# Apps Script files — ficam apenas no Google Apps Script
+*.gs
+
+# Documentos internos
+*.docx
+
+# macOS
+.DS_Store

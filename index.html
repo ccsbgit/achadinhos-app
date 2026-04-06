@@ -1,0 +1,2892 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Carrossel · Achadinhos</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+  <style>
+    /* ========== VARIÁVEIS E RESET ========== */
+    :root {
+      --bg:          #0f0f0f;
+      --surface:     #1a1a1a;
+      --card:        #222222;
+      --border:      #333333;
+      --accent:      #E1306C;
+      --accent-dark: #b02456;
+      --text:        #f5f5f5;
+      --muted:       #888888;
+      --success:     #2ecc71;
+      --warn:        #f39c12;
+      --error:       #e74c3c;
+      --radius:      12px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px; min-height: 100vh;
+    }
+    button { cursor: pointer; border: none; outline: none; font-family: inherit; transition: opacity .15s, background .15s; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    input, select, textarea { font-family: inherit; font-size: 14px; }
+    select { cursor: pointer; }
+
+    /* ========== LAYOUT GERAL ========== */
+    .tela { display: none; max-width: 1100px; margin: 0 auto; padding: 0 16px 40px; }
+    .tela.ativa { display: block; }
+
+    .app-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 24px;
+    }
+    .app-header h1, .app-header h2 {
+      font-size: 18px; font-weight: 700; flex: 1;
+    }
+    .btn-icon {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; font-size: 16px;
+    }
+    .btn-icon:hover { background: var(--card); }
+
+    .btn-primary {
+      background: var(--accent); color: #fff;
+      border-radius: 8px; padding: 10px 20px; font-weight: 600; font-size: 14px;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-dark); }
+
+    .btn-secondary {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 20px; font-weight: 500;
+    }
+    .btn-secondary:hover:not(:disabled) { background: var(--card); }
+
+    .tela-footer {
+      display: flex; justify-content: flex-end; gap: 12px;
+      margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border);
+    }
+
+    /* ========== TELA 1 — CONFIGURAÇÃO ========== */
+    .controles-topo {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 28px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 20px;
+    }
+    .controles-topo label { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .controles-topo input[type="number"] {
+      background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 8px 12px;
+      width: 80px; text-align: center; font-size: 16px; font-weight: 600;
+    }
+    .btn-especial {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); border-radius: 8px; padding: 8px 14px;
+      font-size: 13px; font-weight: 500; transition: all .15s;
+    }
+    .btn-especial:hover { background: var(--card); color: var(--text); }
+    .btn-especial.ativo {
+      background: #1a2a1a; border-color: var(--success);
+      color: var(--success);
+    }
+    .card-tipo-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: .8px;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+    }
+    .badge-capa       { background: #2a1a2a; color: #c678dd; }
+    .badge-tela-final { background: #1a1a2a; color: #61afef; }
+    .card-header-actions { display: none; align-items: center; gap: 4px; }
+    .card-header-actions.visivel { display: flex; }
+    .btn-card-action {
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 2px 7px; font-size: 11px; line-height: 1.6;
+    }
+    .btn-card-action.btn-clear:hover  { color: var(--error);   border-color: var(--error); }
+    .btn-card-action.btn-reload:hover { color: var(--success); border-color: var(--success); }
+    .badge-fallback {
+      font-size: 10px; color: var(--warn); border: 1px solid var(--warn);
+      border-radius: 4px; padding: 1px 5px; margin-left: 4px; opacity: .8;
+    }
+
+    #grid-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .card-item {
+      background: var(--surface); border: 2px solid var(--border);
+      border-radius: var(--radius); transition: border-color .2s;
+      /* sem overflow:hidden para permitir dropdown do select sair do card */
+    }
+    .card-item.ativo { border-color: var(--accent); }
+    .card-item.ativo .card-numero { color: var(--accent); }
+
+    .card-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; background: var(--card);
+    }
+    .card-numero { font-weight: 700; font-size: 13px; letter-spacing: .5px; }
+    .card-status-dot { font-size: 16px; color: var(--muted); }
+    .card-status-dot.ok { color: var(--success); }
+
+    .card-img-area {
+      position: relative; width: 100%; padding-bottom: 125%;
+      background: var(--card); cursor: pointer; overflow: hidden;
+    }
+    .card-img-area:hover .card-placeholder { background: #1f1f1f; }
+
+    .card-preview {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    .card-placeholder {
+      position: absolute; inset: 0; display: flex;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 6px; padding: 12px; text-align: center; background: var(--card);
+      transition: background .15s;
+    }
+    .placeholder-icon { font-size: 28px; }
+    .placeholder-text { font-size: 12px; color: var(--muted); }
+    .placeholder-hint { font-size: 11px; color: var(--border); }
+
+    .card-footer { padding: 10px 12px; display: flex; gap: 8px; align-items: center; }
+    .card-select {
+      flex: 1; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 7px 8px;
+      font-size: 12px; min-width: 0;
+    }
+    /* ===== SEARCHABLE SELECT ===== */
+    .ss-wrap { position: relative; flex: 1; min-width: 0; }
+    .ss-input {
+      width: 100%; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 7px 8px;
+      font-size: 12px; min-width: 0;
+    }
+    .ss-input:focus { outline: none; border-color: var(--accent); }
+    .ss-input::placeholder { color: var(--muted); }
+    .ss-dropdown {
+      display: none; position: fixed; z-index: 9999;
+      background: var(--card); border: 1px solid var(--accent);
+      border-radius: 8px; max-height: 220px; overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,.6);
+    }
+    .ss-dropdown.aberto { display: block; }
+    .ss-item {
+      padding: 8px 12px; font-size: 12px; cursor: pointer;
+      border-bottom: 1px solid var(--border); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .ss-item:last-child { border-bottom: none; }
+    .ss-item:hover, .ss-item.destacado { background: var(--surface); color: var(--accent); }
+    .ss-hint {
+      padding: 8px 12px; font-size: 11px; color: var(--muted);
+      text-align: center; font-style: italic;
+    }
+    .btn-arquivo {
+      background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 7px 10px; font-size: 13px;
+    }
+    .btn-arquivo:hover { background: var(--border); }
+
+    /* ========== TELA 2 — EDITOR ========== */
+    .editor-layout {
+      display: grid; grid-template-columns: 500px 1fr; gap: 24px; align-items: start;
+    }
+    @media (max-width: 800px) { .editor-layout { grid-template-columns: 1fr; } }
+
+    .canvas-wrapper {
+      position: relative; width: 500px; max-width: 100%;
+      border-radius: var(--radius); overflow: hidden;
+      border: 2px solid var(--border);
+    }
+    #fabric-canvas { display: block; }
+
+    .nav-cards-editor {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .btn-nav {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 8px 14px; font-size: 16px;
+    }
+    .btn-nav:hover:not(:disabled) { background: var(--card); }
+    #indicador-card { font-size: 13px; color: var(--muted); min-width: 80px; text-align: center; }
+
+    .toolbar {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px;
+    }
+    .toolbar h3 { font-size: 14px; color: var(--muted); margin-bottom: 16px; text-transform: uppercase; letter-spacing: .5px; }
+
+    .toolbar-group { display: flex; flex-direction: column; gap: 14px; }
+    .toolbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .toolbar-row label { font-size: 12px; color: var(--muted); min-width: 40px; }
+
+    .toolbar input[type="color"] {
+      width: 38px; height: 32px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--card); cursor: pointer; padding: 2px;
+    }
+    .toolbar input[type="number"] {
+      background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 6px 8px;
+      width: 64px; text-align: center;
+    }
+    .toolbar select {
+      background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 6px 8px; flex: 1;
+    }
+    .btn-style {
+      background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 6px 12px; font-size: 14px;
+    }
+    .btn-style.ativo { background: var(--accent); border-color: var(--accent); }
+    .btn-style:hover { background: var(--border); }
+
+    .toolbar-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+    .legenda-area { margin-top: 24px; }
+    .legenda-area label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .legenda-area textarea {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); border-radius: var(--radius); padding: 12px;
+      resize: vertical; min-height: 90px; line-height: 1.5;
+    }
+    .legenda-area textarea:focus { outline: none; border-color: var(--accent); }
+
+    /* ========== TELA 3 — PREVIEW / AGENDAMENTO ========== */
+    .tela3-layout {
+      display: grid; grid-template-columns: 400px 1fr; gap: 32px; align-items: start;
+    }
+    @media (max-width: 800px) { .tela3-layout { grid-template-columns: 1fr; } }
+
+    /* Mock Instagram */
+    .ig-mock {
+      background: #000; border: 1px solid #262626;
+      border-radius: 12px; overflow: hidden; max-width: 400px;
+    }
+    .ig-post-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px; background: #000;
+    }
+    .ig-avatar {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: linear-gradient(45deg, var(--accent), #f77737);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px;
+    }
+    .ig-username { font-size: 14px; font-weight: 600; flex: 1; }
+    .ig-mais { color: var(--muted); font-size: 18px; letter-spacing: 1px; }
+
+    .ig-imagem-container {
+      position: relative; width: 100%; padding-bottom: 125%; background: #111;
+    }
+    #ig-preview-img {
+      position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    }
+    .ig-nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,.12); color: #fff; border-radius: 50%;
+      width: 28px; height: 28px; font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      transition: opacity .2s;
+    }
+    #ig-prev, #cal-p-prev { left: 8px; }
+    #ig-next, #cal-p-next { right: 8px; }
+
+    .ig-dots {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 5px;
+    }
+    .ig-dots .dot {
+      width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.4);
+      transition: background .2s, transform .2s;
+    }
+    .ig-dots .dot.ativo { background: #fff; transform: scale(1.2); }
+
+    .ig-acoes {
+      display: flex; align-items: center; gap: 14px;
+      padding: 12px 14px; font-size: 22px;
+    }
+    .ig-acoes span { cursor: pointer; }
+    .ig-bookmark { margin-left: auto; }
+
+    .ig-legenda {
+      padding: 0 14px 14px; font-size: 13px; line-height: 1.5;
+      color: #e0e0e0; max-height: 80px; overflow: hidden; word-break: break-word;
+    }
+    .ig-legenda::before { content: 'achadinhos '; font-weight: 700; }
+
+    /* Painel de agendamento */
+    .agenda-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px;
+    }
+    .agenda-panel h3 { font-size: 16px; margin-bottom: 20px; }
+
+    .campo-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .campo-grupo { margin-bottom: 16px; }
+
+    .data-hora-row { display: flex; gap: 12px; }
+    .data-hora-row input {
+      flex: 1; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 10px 12px;
+    }
+    .data-hora-row input:focus { outline: none; border-color: var(--accent); }
+
+    .botoes-acao { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
+    .btn-download {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 12px 20px;
+      font-weight: 600; font-size: 14px; text-align: center;
+    }
+    .btn-download:hover { background: var(--card); }
+    .btn-agendar {
+      background: var(--accent); color: #fff;
+      border-radius: 8px; padding: 12px 20px;
+      font-weight: 700; font-size: 15px; text-align: center;
+    }
+    .btn-agendar:hover:not(:disabled) { background: var(--accent-dark); }
+
+    /* Bloco de sucesso pós-agendamento */
+    .agenda-sucesso {
+      display: none; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; padding: 12px 0;
+      gap: 16px;
+    }
+    .agenda-sucesso.visivel { display: flex; }
+    .agenda-sucesso-icone { font-size: 48px; line-height: 1; }
+    .agenda-sucesso-label {
+      font-size: 13px; color: var(--muted); margin: 0; letter-spacing: .3px;
+    }
+    .agenda-sucesso-data {
+      font-size: 28px; font-weight: 700; color: var(--success);
+      margin: 0; line-height: 1.1;
+    }
+    .btn-novo-post {
+      background: var(--accent); color: #fff;
+      border-radius: 8px; padding: 12px 28px;
+      font-weight: 700; font-size: 15px; margin-top: 8px;
+    }
+    .btn-novo-post:hover { background: var(--accent-dark); }
+
+    /* ========== MODAL CONFIGURAÇÕES ========== */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.7); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.aberto { display: flex; }
+
+    /* Layout com sidebar */
+    .modal-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 100%; max-width: 620px; margin: 16px;
+      display: flex; flex-direction: column;
+      max-height: 90vh;
+    }
+    .modal-box-header {
+      padding: 20px 24px 0; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-box-header h3 { font-size: 16px; }
+    .modal-box-body {
+      display: flex; flex: 1; overflow: hidden; margin-top: 16px;
+    }
+
+    /* Sidebar */
+    .modal-sidebar {
+      width: 130px; flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      padding: 8px 0;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .modal-sidebar-btn {
+      background: none; border: none; color: var(--muted);
+      text-align: left; padding: 10px 16px; font-size: 13px;
+      cursor: pointer; transition: color .15s, background .15s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .modal-sidebar-btn:hover { color: var(--text); background: rgba(255,255,255,.04); }
+    .modal-sidebar-btn.ativo { color: var(--accent); background: rgba(225,48,108,.08); font-weight: 600; }
+
+    /* Painel de conteúdo */
+    .modal-painel {
+      flex: 1; overflow-y: auto; padding: 8px 24px 20px;
+      display: none;
+    }
+    .modal-painel.ativo { display: block; }
+    .modal-painel-titulo {
+      font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .06em;
+      margin-bottom: 16px; padding-top: 4px;
+    }
+
+    /* Campos */
+    .modal-campo { margin-bottom: 16px; }
+    .modal-campo label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .modal-campo input {
+      width: 100%; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 10px 12px;
+    }
+    .modal-campo input:focus { outline: none; border-color: var(--accent); }
+    .modal-campo textarea {
+      width: 100%; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 10px 12px;
+      resize: vertical; min-height: 80px; line-height: 1.5; font-size: 13px;
+      font-family: inherit;
+    }
+    .modal-campo textarea:focus { outline: none; border-color: var(--accent); }
+    .modal-campo .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    /* Footer */
+    .modal-footer {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 14px 24px; border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    /* ========== TELA LOGIN ========== */
+    #tela-login {
+      position: fixed; inset: 0; background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 28px; z-index: 9999;
+    }
+    #tela-login.oculta { display: none; }
+    .login-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 40px 36px;
+      text-align: center; width: 100%; max-width: 340px;
+    }
+    .login-logo { font-size: 48px; margin-bottom: 12px; }
+    .login-titulo { font-size: 22px; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
+    .login-sub { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
+    .login-btn-area { display: flex; justify-content: center; }
+    #login-erro { color: var(--error); font-size: 12px; margin-top: 12px; min-height: 16px; }
+
+    /* ========== TELA 4 — CALENDÁRIO ========== */
+    .cal-nav {
+      display: flex; align-items: center; justify-content: center; gap: 20px;
+      margin-bottom: 20px;
+    }
+    .cal-nav span { font-size: 17px; font-weight: 700; min-width: 160px; text-align: center; }
+
+    .cal-grid {
+      display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+    }
+    .cal-cabecalho {
+      text-align: center; font-size: 11px; color: var(--muted);
+      padding: 6px 0; font-weight: 700; letter-spacing: .5px;
+      text-transform: uppercase;
+    }
+    .cal-dia {
+      min-height: 90px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px; overflow: hidden;
+    }
+    .cal-dia.outro-mes { opacity: .3; }
+    .cal-dia.hoje { border-color: var(--accent); }
+    .cal-dia-numero {
+      font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 4px;
+    }
+    .cal-dia.hoje .cal-dia-numero { color: var(--accent); }
+
+    .cal-post {
+      display: flex; align-items: center; gap: 5px;
+      background: var(--card); border-radius: 4px; padding: 3px 5px;
+      margin-bottom: 3px; font-size: 10px; cursor: pointer;
+      border-left: 3px solid var(--muted); overflow: hidden;
+      transition: opacity .15s;
+    }
+    .cal-post:hover { opacity: .75; }
+    .cal-post.agendado   { border-left-color: #3498db; }
+    .cal-post.publicado  { border-left-color: var(--success); }
+    .cal-post.publicando { border-left-color: var(--warn); }
+    .cal-post.erro       { border-left-color: var(--error); }
+    .cal-post img {
+      width: 20px; height: 25px; object-fit: cover;
+      border-radius: 2px; flex-shrink: 0; background: var(--border);
+    }
+    .cal-post-hora { font-weight: 700; white-space: nowrap; font-size: 10px; }
+
+    /* Modal de preview do post agendado */
+    .modal-cal-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: calc(100% - 32px); max-width: 780px;
+      max-height: calc(100vh - 32px);
+      display: flex; flex-direction: row;
+      overflow: hidden;
+    }
+    .modal-cal-left {
+      width: 300px; flex-shrink: 0;
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+    }
+    .modal-cal-left .ig-mock {
+      border-radius: 0; border: none; max-width: none;
+    }
+    .modal-cal-right {
+      flex: 1; display: flex; flex-direction: column;
+      min-width: 0; overflow: hidden;
+    }
+    .modal-cal-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      padding: 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .modal-cal-tempo { font-size: 14px; font-weight: 700; }
+    .modal-cal-status { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .modal-cal-info {
+      flex: 1; padding: 16px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .modal-cal-info-row { display: flex; flex-direction: column; gap: 5px; }
+    .modal-cal-info-label {
+      font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .7px; font-weight: 600;
+    }
+    .modal-cal-info-value {
+      font-size: 13px; line-height: 1.5; word-break: break-word; color: var(--text);
+    }
+    .modal-cal-info-value.legenda {
+      color: var(--muted); font-size: 12px;
+      max-height: 120px; overflow-y: auto; display: block;
+    }
+    .modal-cal-footer {
+      display: flex; gap: 10px; padding: 14px 16px;
+      border-top: 1px solid var(--border); flex-shrink: 0;
+    }
+    @media (max-width: 620px) {
+      .modal-cal-box { flex-direction: column; max-width: 400px; }
+      .modal-cal-left { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+    }
+
+    .cal-legenda {
+      display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
+      margin-top: 16px; font-size: 11px; color: var(--muted);
+    }
+    .cal-legenda-item { display: flex; align-items: center; gap: 6px; }
+    .cal-legenda-dot {
+      width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+    }
+
+    /* ========== LOADING OVERLAY ========== */
+    #loading-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.75); z-index: 2000;
+      align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    }
+    #loading-overlay.visivel { display: flex; }
+    .spinner {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 3px solid var(--border); border-top-color: var(--accent);
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-msg { color: var(--text); font-size: 14px; }
+
+    /* ========== TOASTS ========== */
+    #toast-container {
+      position: fixed; bottom: 24px; right: 24px; z-index: 3000;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .toast {
+      background: var(--surface); border-left: 4px solid var(--muted);
+      color: var(--text); border-radius: 8px; padding: 12px 16px;
+      font-size: 13px; max-width: 320px; word-break: break-word;
+      animation: slideIn .2s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,.4);
+    }
+    .toast-success { border-left-color: var(--success); }
+    .toast-warn    { border-left-color: var(--warn); }
+    .toast-error   { border-left-color: var(--error); }
+    .toast-info    { border-left-color: var(--accent); }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+  </style>
+</head>
+<body>
+
+<!-- ===== TELA LOGIN ===== -->
+<div id="tela-login">
+  <div class="login-card">
+    <div class="login-logo">📱</div>
+    <div class="login-titulo">Achadinhos</div>
+    <div class="login-sub">Ferramenta interna de posts</div>
+    <div class="login-btn-area">
+      <div id="google-signin-btn"></div>
+    </div>
+    <div id="login-erro"></div>
+  </div>
+</div>
+
+<!-- ===== TELA 1 — CONFIGURAÇÃO DOS CARDS ===== -->
+<div id="tela-1" class="tela ativa">
+  <div class="app-header">
+    <h1>🎠 Criar Carrossel</h1>
+    <button class="btn-icon" id="btn-calendario" title="Calendário de posts">📅</button>
+    <button class="btn-icon" id="btn-config" title="Configurações Instagram">⚙️</button>
+  </div>
+
+  <div class="controles-topo">
+    <label>Quantos cards?</label>
+    <input type="number" id="input-num-cards" min="1" max="10" value="3">
+    <button class="btn-primary" id="btn-criar">Criar Carrossel</button>
+    <button class="btn-especial" id="btn-add-capa" title="Adiciona um card de capa na primeira posição">+ Capa</button>
+    <button class="btn-especial" id="btn-add-final" title="Adiciona um card de tela final na última posição">+ Tela Final</button>
+  </div>
+
+  <div id="grid-cards"></div>
+
+  <div class="tela-footer">
+    <button class="btn-primary" id="btn-avancar" disabled>Avançar para Editor →</button>
+  </div>
+</div>
+
+<!-- ===== TELA 2 — EDITOR DE TEXTO ===== -->
+<div id="tela-2" class="tela">
+  <div class="app-header">
+    <button class="btn-icon" id="btn-voltar-t1">← Voltar</button>
+    <h2>Editor de Cards</h2>
+    <div class="nav-cards-editor">
+      <button class="btn-nav" id="btn-card-prev">◀</button>
+      <span id="indicador-card">Card 1 de 1</span>
+      <button class="btn-nav" id="btn-card-next">▶</button>
+    </div>
+  </div>
+
+  <div class="editor-layout">
+    <!-- Canvas -->
+    <div class="canvas-wrapper">
+      <canvas id="fabric-canvas" width="500" height="625"></canvas>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <h3>Imagem</h3>
+      <div class="toolbar-group" style="margin-bottom:14px">
+        <button class="btn-secondary" id="btn-reposicionar">↔ Reposicionar</button>
+        <div id="reposicionar-controls" style="display:none;flex-direction:column;gap:10px">
+          <div style="font-size:11px;color:var(--muted);line-height:1.5">
+            Arraste para mover · alças de canto para escalar.<br>A rotação está bloqueada.
+          </div>
+          <div class="toolbar-row">
+            <button class="btn-primary"   id="btn-confirmar-repos" style="flex:1">✓ Confirmar</button>
+            <button class="btn-secondary" id="btn-cancelar-repos"  style="flex:1">✕ Cancelar</button>
+          </div>
+        </div>
+      </div>
+
+      <hr class="toolbar-divider">
+
+      <h3 style="margin-top:12px">Ferramentas de Texto</h3>
+      <div class="toolbar-group">
+        <button class="btn-primary" id="btn-add-texto">＋ Adicionar Texto</button>
+
+        <hr class="toolbar-divider">
+
+        <div class="toolbar-row">
+          <label>Cor</label>
+          <input type="color" id="input-cor" value="#ffffff">
+          <label>Tam.</label>
+          <input type="number" id="input-tamanho" value="32" min="8" max="200">
+        </div>
+
+        <div class="toolbar-row">
+          <label>Fonte</label>
+          <select id="input-fonte">
+            <option value="Arial">Arial</option>
+            <option value="Impact">Impact</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Verdana">Verdana</option>
+            <option value="Courier New">Courier</option>
+          </select>
+        </div>
+
+        <div class="toolbar-row">
+          <button class="btn-style" id="btn-negrito" title="Negrito"><strong>N</strong></button>
+          <button class="btn-style" id="btn-italico" title="Itálico"><em>I</em></button>
+          <button class="btn-style" id="btn-sombra" title="Sombra no texto">☁</button>
+          <button class="btn-secondary" id="btn-remover-obj" style="margin-left:auto">🗑 Remover</button>
+        </div>
+
+        <hr class="toolbar-divider">
+
+        <div class="toolbar-row">
+          <label>Fundo</label>
+          <button class="btn-style" id="btn-bg-toggle">◻ Sem fundo</button>
+        </div>
+        <div id="bg-controls" style="display:none; flex-direction:column; gap:10px; margin-top:4px">
+          <div class="toolbar-row">
+            <label>Cor</label>
+            <input type="color" id="input-bg-cor" value="#000000">
+            <label>Opac.</label>
+            <input type="number" id="input-bg-opacidade" value="70" min="0" max="100">
+            <span style="font-size:11px;color:var(--muted)">%</span>
+          </div>
+          <div class="toolbar-row">
+            <label>Espaç.</label>
+            <input type="number" id="input-bg-padding" value="10" min="0" max="80">
+            <label>Raio</label>
+            <input type="number" id="input-bg-radius" value="6" min="0" max="80">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legenda-area">
+    <label>Legenda do post (compartilhada em todos os cards)</label>
+    <textarea id="textarea-legenda" placeholder="Digite aqui a legenda do post no Instagram…"></textarea>
+  </div>
+
+  <div class="tela-footer">
+    <button class="btn-secondary" id="btn-voltar-t1-footer">← Voltar</button>
+    <button class="btn-primary" id="btn-salvar-continuar">Salvar e Continuar →</button>
+  </div>
+</div>
+
+<!-- ===== TELA 3 — PREVIEW E AGENDAMENTO ===== -->
+<div id="tela-3" class="tela">
+  <div class="app-header">
+    <button class="btn-icon" id="btn-voltar-t2">← Editar</button>
+    <h2>Preview e Agendamento</h2>
+    <button class="btn-icon" id="btn-config-t3" title="Configurações Instagram">⚙️</button>
+  </div>
+
+  <div class="tela3-layout">
+    <!-- Mock Instagram -->
+    <div class="ig-mock">
+      <div class="ig-post-header">
+        <div class="ig-avatar">A</div>
+        <span class="ig-username">achadinhos</span>
+        <span class="ig-mais">···</span>
+      </div>
+      <div class="ig-imagem-container">
+        <img id="ig-preview-img" src="" alt="Preview do card">
+        <button class="ig-nav" id="ig-prev">‹</button>
+        <button class="ig-nav" id="ig-next">›</button>
+        <div class="ig-dots" id="ig-dots"></div>
+      </div>
+      <div class="ig-acoes">
+        <span title="Curtir">♡</span>
+        <span title="Comentar">💬</span>
+        <span title="Compartilhar">✈</span>
+        <span class="ig-bookmark" title="Salvar">🔖</span>
+      </div>
+      <div class="ig-legenda" id="ig-legenda-preview"></div>
+    </div>
+
+    <!-- Painel de agendamento -->
+    <div class="agenda-panel">
+
+      <!-- Formulário (visível por padrão) -->
+      <div id="bloco-agendamento">
+        <h3>📅 Agendar Publicação</h3>
+
+        <div class="campo-grupo">
+          <div class="campo-label">Data e hora da publicação</div>
+          <div class="data-hora-row">
+            <input type="date" id="input-data">
+            <input type="time" id="input-hora">
+          </div>
+        </div>
+
+        <div class="botoes-acao">
+          <button class="btn-download" id="btn-download">⬇️ Download dos Cards</button>
+          <button class="btn-agendar" id="btn-agendar">📅 Agendar Postagem</button>
+        </div>
+      </div>
+
+      <!-- Sucesso (oculto até agendar) -->
+      <div class="agenda-sucesso" id="bloco-sucesso">
+        <div class="agenda-sucesso-icone">✅</div>
+        <p class="agenda-sucesso-label">Post agendado com sucesso para o dia</p>
+        <p class="agenda-sucesso-data" id="sucesso-data-hora">—</p>
+        <button class="btn-novo-post" id="btn-novo-post">＋ Criar novo post</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ===== TELA 4 — CALENDÁRIO ===== -->
+<div id="tela-4" class="tela">
+  <div class="app-header">
+    <button class="btn-icon" id="btn-voltar-t4">← Voltar</button>
+    <h2>Calendário de Posts</h2>
+    <button class="btn-primary" id="btn-novo-post-cal" style="padding:8px 14px;font-size:13px">＋ Novo post</button>
+  </div>
+
+  <div class="cal-nav">
+    <button class="btn-icon" id="cal-prev">‹</button>
+    <span id="cal-mes-ano">—</span>
+    <button class="btn-icon" id="cal-next">›</button>
+  </div>
+
+  <div class="cal-grid" id="cal-grid"></div>
+
+  <div class="cal-legenda">
+    <div class="cal-legenda-item"><div class="cal-legenda-dot" style="background:#3498db"></div>Agendado</div>
+    <div class="cal-legenda-item"><div class="cal-legenda-dot" style="background:var(--success)"></div>Publicado</div>
+    <div class="cal-legenda-item"><div class="cal-legenda-dot" style="background:var(--warn)"></div>Publicando</div>
+    <div class="cal-legenda-item"><div class="cal-legenda-dot" style="background:var(--error)"></div>Erro</div>
+  </div>
+</div>
+
+<!-- ===== MODAL CONFIGURAÇÕES ===== -->
+<div id="modal-config" class="modal-overlay">
+  <div class="modal-box">
+
+    <!-- Cabeçalho -->
+    <div class="modal-box-header">
+      <h3>⚙️ Configurações</h3>
+      <button class="btn-icon" id="btn-fechar-modal">✕</button>
+    </div>
+
+    <!-- Body: sidebar + painéis -->
+    <div class="modal-box-body">
+
+      <!-- Sidebar -->
+      <nav class="modal-sidebar">
+        <button class="modal-sidebar-btn ativo" data-painel="posts">📝 Posts</button>
+        <button class="modal-sidebar-btn" data-painel="instagram">📸 Instagram</button>
+        <button class="modal-sidebar-btn" data-painel="cloudinary">☁️ Cloudinary</button>
+      </nav>
+
+      <!-- Painel: Posts -->
+      <div class="modal-painel ativo" id="painel-posts">
+        <div class="modal-painel-titulo">Posts</div>
+        <div class="modal-campo">
+          <label>Legenda Padrão</label>
+          <textarea id="input-legenda-padrao" placeholder="Texto pré-preenchido no campo de legenda de cada novo post…"></textarea>
+          <div class="hint">Preenchida automaticamente ao entrar na Tela 2. Pode ser editada antes de agendar.</div>
+        </div>
+      </div>
+
+      <!-- Painel: Instagram -->
+      <div class="modal-painel" id="painel-instagram">
+        <div class="modal-painel-titulo">Instagram</div>
+        <div class="modal-campo">
+          <label>Access Token</label>
+          <div style="display:flex;gap:8px;align-items:flex-start">
+            <div style="flex:1">
+              <input type="password" id="input-token" placeholder="EAABsbCS..." style="width:100%">
+              <div class="hint" id="hint-token-status">Token de longa duração da conta Business. Nunca é exibido após salvo.</div>
+            </div>
+            <button class="btn-secondary" id="btn-renovar-token" title="Trocar o token atual por um novo de 60 dias" style="white-space:nowrap;padding:8px 12px;font-size:12px;flex-shrink:0">🔄 Renovar</button>
+          </div>
+        </div>
+        <div class="modal-campo">
+          <label>Instagram User ID</label>
+          <input type="text" id="input-user-id" placeholder="123456789012345">
+          <div class="hint">ID numérico da conta Business (não o @usuário).</div>
+        </div>
+        <div class="modal-campo">
+          <label>App ID (Meta)</label>
+          <input type="text" id="input-app-id" placeholder="1234567890123456">
+          <div class="hint">Encontrado em <strong>developers.facebook.com</strong> → seu app → Painel. Necessário para renovação automática do token.</div>
+        </div>
+        <div class="modal-campo">
+          <label>App Secret (Meta)</label>
+          <input type="password" id="input-app-secret" placeholder="••••••••••••••••••••••••••••••••">
+          <div class="hint">Em Configurações → Básico no painel do app. Nunca é exibido após salvo.</div>
+        </div>
+      </div>
+
+      <!-- Painel: Cloudinary -->
+      <div class="modal-painel" id="painel-cloudinary">
+        <div class="modal-painel-titulo">Cloudinary</div>
+        <div class="modal-campo">
+          <label>Cloud Name</label>
+          <input type="text" id="input-cloudinary-cloud-name" placeholder="meu-cloud-name">
+          <div class="hint">Encontrado no painel em <strong>cloudinary.com/console</strong>.</div>
+        </div>
+        <div class="modal-campo">
+          <label>Upload Preset</label>
+          <input type="text" id="input-cloudinary-upload-preset" placeholder="achadinhos_preset">
+          <div class="hint">Crie em Settings → Upload → Upload Presets. Defina como <strong>Unsigned</strong>.</div>
+        </div>
+      </div>
+
+    </div><!-- /modal-box-body -->
+
+    <!-- Footer -->
+    <div class="modal-footer">
+      <button class="btn-secondary" id="btn-cancelar-config">Cancelar</button>
+      <button class="btn-primary" id="btn-salvar-config">Salvar</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== MODAL PREVIEW CALENDÁRIO ===== -->
+<div id="modal-cal-preview" class="modal-overlay">
+  <div class="modal-cal-box">
+
+    <!-- ESQUERDA: simulação Instagram -->
+    <div class="modal-cal-left">
+      <div class="ig-mock">
+        <div class="ig-post-header">
+          <div class="ig-avatar">A</div>
+          <span class="ig-username">achadinhos</span>
+          <span class="ig-mais">···</span>
+        </div>
+        <div class="ig-imagem-container">
+          <img id="cal-p-img" src="" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+          <div id="cal-p-img-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);font-size:12px;color:#aaa">Carregando…</div>
+          <button class="ig-nav" id="cal-p-prev">‹</button>
+          <button class="ig-nav" id="cal-p-next">›</button>
+          <div class="ig-dots" id="cal-p-dots"></div>
+        </div>
+        <div class="ig-acoes">
+          <span>♡</span><span>💬</span><span>✈</span>
+          <span class="ig-bookmark">🔖</span>
+        </div>
+        <div class="ig-legenda" id="cal-p-legenda"></div>
+      </div>
+    </div>
+
+    <!-- DIREITA: dados + ações -->
+    <div class="modal-cal-right">
+
+      <div class="modal-cal-header">
+        <div>
+          <div class="modal-cal-tempo" id="cal-p-tempo">—</div>
+          <div class="modal-cal-status" id="cal-p-status-label">—</div>
+        </div>
+        <button class="btn-icon" id="btn-fechar-cal-p" style="font-size:18px;line-height:1;padding:6px 10px">✕</button>
+      </div>
+
+      <div class="modal-cal-info">
+        <div class="modal-cal-info-row">
+          <span class="modal-cal-info-label">Título</span>
+          <span class="modal-cal-info-value" id="cal-p-titulo">—</span>
+        </div>
+        <div class="modal-cal-info-row">
+          <span class="modal-cal-info-label">Cards</span>
+          <span class="modal-cal-info-value" id="cal-p-num-cards">—</span>
+        </div>
+        <div class="modal-cal-info-row">
+          <span class="modal-cal-info-label">Legenda</span>
+          <span class="modal-cal-info-value legenda" id="cal-p-legenda-right">—</span>
+        </div>
+      </div>
+
+      <div class="modal-cal-footer">
+        <button class="btn-secondary" id="btn-excluir-cal-p" style="flex:1">🗑 Excluir</button>
+        <button class="btn-primary"   id="btn-editar-cal-p"  style="flex:2">✏️ Editar post</button>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== LOADING OVERLAY ===== -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div id="loading-msg">Aguarde…</div>
+</div>
+
+<!-- ===== TOAST CONTAINER ===== -->
+<div id="toast-container"></div>
+
+<!-- ===================================================
+     JAVASCRIPT — Lógica da aplicação
+===================================================== -->
+<script>
+// ============================================================
+//  ESTADO GLOBAL
+// ============================================================
+var App = {
+  numCards:      0,
+  cards:         [],
+  // card: { index, tipo ('produto'|'capa'|'tela_final'), itemId, nome,
+  //         imagemDataUrl, imagemBase64, mimeType, driveUrl, canvasObjects, imagemExportadaBase64 }
+  cardAtivo:     null,   // Tela 1: card ativo para Ctrl+V
+  cardEditor:    0,      // Tela 2: card sendo editado
+  cardPreview:   0,      // Tela 3: card sendo exibido
+  canvas:        null,   // instância Fabric.js
+  legenda:          '',
+  legendaPadrao:    '',
+  editandoPostId:   null,   // ID do post sendo editado (null = novo post)
+  produtos:         [],
+  t2Iniciado:    false,
+  temCapa:       false,
+  temTelaFinal:  false
+};
+
+// ============================================================
+//  UTILITÁRIOS
+// ============================================================
+
+// ============================================================
+//  CONFIG — preencha com seus valores após criar as credenciais
+// ============================================================
+var CONFIG = {
+  GAS_API_URL:      'COLE_AQUI_A_URL_DO_GAS_EXEC',           // ex: https://script.google.com/macros/s/AKf.../exec
+  GOOGLE_CLIENT_ID: 'COLE_AQUI_O_CLIENT_ID.apps.googleusercontent.com'
+};
+
+// ============================================================
+//  AUTENTICAÇÃO — Google Identity Services
+// ============================================================
+var Auth = {
+  idToken: null,
+  email:   null,
+  expiry:  0       // timestamp em ms
+};
+
+function _parseJwtPayload(token) {
+  try {
+    var b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    var pad = b64.length % 4;
+    if (pad) b64 += '===='.slice(pad);
+    return JSON.parse(atob(b64));
+  } catch(e) { return {}; }
+}
+
+function _tokenValido() {
+  return !!Auth.idToken && Date.now() < Auth.expiry - 300000; // margem de 5 min
+}
+
+function onSignIn(response) {
+  var payload  = _parseJwtPayload(response.credential);
+  Auth.idToken = response.credential;
+  Auth.email   = payload.email || '';
+  Auth.expiry  = (payload.exp  || 0) * 1000;
+  document.getElementById('login-erro').textContent = '';
+  document.getElementById('tela-login').classList.add('oculta');
+  inicializarApp();
+}
+
+function mostrarLogin(msg) {
+  document.getElementById('tela-login').classList.remove('oculta');
+  if (msg) document.getElementById('login-erro').textContent = msg;
+}
+
+// ============================================================
+//  API FETCH — substitui google.script.run
+// ============================================================
+async function apiFetch(action, params) {
+  if (!_tokenValido()) {
+    mostrarLogin('Sessão expirada. Faça login novamente.');
+    throw new Error('Sessão expirada.');
+  }
+  var resp = await fetch(CONFIG.GAS_API_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'text/plain' }, // evita preflight CORS no GAS
+    body:    JSON.stringify({ action: action, params: params || {}, idToken: Auth.idToken })
+  });
+  if (!resp.ok) throw new Error('Erro de rede: ' + resp.status);
+  var data = await resp.json();
+  if (!data.sucesso) throw new Error(data.erro || 'Erro no servidor');
+  return data.dados;
+}
+
+function showLoading(msg) {
+  document.getElementById('loading-msg').textContent = msg || 'Aguarde…';
+  document.getElementById('loading-overlay').classList.add('visivel');
+}
+function hideLoading() {
+  document.getElementById('loading-overlay').classList.remove('visivel');
+}
+
+function showToast(msg, tipo) {
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + (tipo || 'info');
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(function() { el.remove(); }, 4500);
+}
+
+function showTela(n) {
+  document.querySelectorAll('.tela').forEach(function(t) { t.classList.remove('ativa'); });
+  document.getElementById('tela-' + n).classList.add('ativa');
+  window.scrollTo(0, 0);
+}
+
+// ============================================================
+//  INIT
+// ============================================================
+function inicializarApp() {
+  showLoading('Carregando…');
+  Promise.all([
+    apiFetch('getProdutos'),
+    apiFetch('getConfiguracoes')
+  ])
+    .then(function(results) {
+      App.produtos      = results[0] || [];
+      var cfg           = results[1] || {};
+      App.legendaPadrao = cfg.legendaPadrao || '';
+      hideLoading();
+      setupTela1();
+      if (App.produtos.length === 0) {
+        showToast('Nenhum produto encontrado na aba LINKS.', 'warn');
+      }
+    })
+    .catch(function(e) {
+      hideLoading();
+      showToast('Erro ao inicializar: ' + e.message, 'error');
+    });
+}
+
+window.addEventListener('load', function() {
+  // Inicializa Google Identity Services
+  google.accounts.id.initialize({
+    client_id:              CONFIG.GOOGLE_CLIENT_ID,
+    callback:               onSignIn,
+    auto_select:            true,   // login silencioso se já autenticado
+    cancel_on_tap_outside:  false
+  });
+
+  // Renderiza botão "Entrar com Google"
+  google.accounts.id.renderButton(
+    document.getElementById('google-signin-btn'),
+    { theme: 'filled_black', size: 'large', text: 'signin_with', locale: 'pt-BR', shape: 'pill' }
+  );
+
+  // Tenta login silencioso — se funcionar, chama onSignIn automaticamente
+  google.accounts.id.prompt(function(notification) {
+    if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+      // Usuário precisa clicar no botão — tela de login já está visível
+    }
+  });
+});
+
+// ============================================================
+//  TELA 1 — CONFIGURAÇÃO
+// ============================================================
+function setupTela1() {
+  document.getElementById('btn-criar').addEventListener('click', function() {
+    var n = parseInt(document.getElementById('input-num-cards').value);
+    if (isNaN(n) || n < 1 || n > 10) {
+      showToast('Informe entre 1 e 10 cards de produto.', 'warn'); return;
+    }
+    criarCards(n);
+  });
+
+  document.getElementById('btn-add-capa').addEventListener('click', adicionarCapa);
+  document.getElementById('btn-add-final').addEventListener('click', adicionarTelaFinal);
+  document.getElementById('btn-calendario').addEventListener('click', irParaTela4);
+
+  document.addEventListener('paste', handlePaste);
+  document.getElementById('btn-avancar').addEventListener('click', function() { irParaTela2(); });
+  document.getElementById('btn-config').addEventListener('click', abrirModalConfig);
+}
+
+function novoCard(tipo) {
+  return { tipo: tipo || 'produto', itemId: null, nome: '',
+           imagemDataUrl: null, imagemBase64: null, mimeType: null,
+           driveUrl: null, canvasObjects: [], imagemExportadaBase64: null,
+           isFallback: false, imagemOriginalUrl: null };
+}
+
+function criarCards(n) {
+  // Reconstrói apenas os cards de produto; preserva capa e tela_final se existirem
+  var novosCards = [];
+  if (App.temCapa)      novosCards.push(novoCard('capa'));
+  for (var i = 0; i < n; i++) novosCards.push(novoCard('produto'));
+  if (App.temTelaFinal) novosCards.push(novoCard('tela_final'));
+
+  App.cards     = novosCards;
+  App.cardAtivo = null;
+  App.t2Iniciado = false;
+
+  renderizarGrid();
+  var total = App.cards.length;
+  showToast(n + ' card(s) de produto criados' + (total > n ? ' + especiais = ' + total + ' no total.' : '.'), 'info');
+}
+
+function renderizarGrid() {
+  App.numCards = App.cards.length;
+  App.cards.forEach(function(c, i) { c.index = i; });
+
+  var grid = document.getElementById('grid-cards');
+  grid.innerHTML = '';
+  App.cards.forEach(function(card, j) {
+    grid.appendChild(criarCardElement(j));
+
+    // Restaura imagem se o card já tinha uma
+    if (card.imagemDataUrl) {
+      setCardImage(j, card.imagemDataUrl, card.imagemBase64, card.mimeType);
+    }
+
+    // Inicializa e restaura o searchable select para cards de produto
+    if (card.tipo === 'produto') {
+      setupSearchableSelect(j);
+      if (card.itemId) {
+        var p = App.produtos.find(function(x) { return String(x.item_id) === String(card.itemId); });
+        var inp = document.getElementById('ss-input-' + j);
+        if (inp && p) inp.value = p.item_id + ' - ' + p.nome;
+      }
+    }
+  });
+  verificarBotaoAvancar();
+}
+
+function adicionarCapa() {
+  if (App.temCapa) {
+    // Remove a capa (sempre está no índice 0)
+    App.cards.shift();
+    App.temCapa = false;
+    document.getElementById('btn-add-capa').classList.remove('ativo');
+    showToast('Capa removida.', 'info');
+  } else {
+    App.cards.unshift(novoCard('capa'));
+    App.temCapa = true;
+    document.getElementById('btn-add-capa').classList.add('ativo');
+    showToast('Card de Capa adicionado na primeira posição.', 'success');
+  }
+  App.t2Iniciado = false;
+  renderizarGrid();
+}
+
+function adicionarTelaFinal() {
+  if (App.temTelaFinal) {
+    // Remove a tela final (sempre está no último índice)
+    App.cards.pop();
+    App.temTelaFinal = false;
+    document.getElementById('btn-add-final').classList.remove('ativo');
+    showToast('Tela Final removida.', 'info');
+  } else {
+    App.cards.push(novoCard('tela_final'));
+    App.temTelaFinal = true;
+    document.getElementById('btn-add-final').classList.add('ativo');
+    showToast('Card de Tela Final adicionado na última posição.', 'success');
+  }
+  App.t2Iniciado = false;
+  renderizarGrid();
+}
+
+function getLabelCard(index) {
+  var card  = App.cards[index];
+  var total = App.numCards;
+  if (card.tipo === 'capa')       return '🎨 Capa · 1 de ' + total;
+  if (card.tipo === 'tela_final') return '🏁 Tela Final · ' + total + ' de ' + total;
+  return 'Card ' + (index + 1) + ' de ' + total;
+}
+
+function criarCardElement(i) {
+  var div  = document.createElement('div');
+  var card = App.cards[i];
+  var tipo = card.tipo;
+
+  div.className = 'card-item';
+  div.id = 'card-' + i;
+
+  // Header label, badge e botões de ação por tipo
+  var headerLabel, badge, acoes;
+  if (tipo === 'capa') {
+    headerLabel = '🎨 Capa';
+    badge  = '<span class="card-tipo-badge badge-capa">capa</span>';
+    acoes  = '<button class="btn-card-action btn-clear" id="btn-clear-' + i + '" title="Limpar imagem">✕</button>';
+  } else if (tipo === 'tela_final') {
+    headerLabel = '🏁 Tela Final';
+    badge  = '<span class="card-tipo-badge badge-tela-final">final</span>';
+    acoes  = '<button class="btn-card-action btn-clear" id="btn-clear-' + i + '" title="Limpar imagem">✕</button>';
+  } else {
+    headerLabel = 'Card ' + (i + 1);
+    badge  = '<span class="card-status-dot" id="dot-' + i + '">○</span>';
+    acoes  = '<button class="btn-card-action btn-reload" id="btn-reload-' + i + '" title="Recarregar imagem original do produto">↺</button>' +
+             '<button class="btn-card-action btn-clear"  id="btn-clear-'  + i + '" title="Limpar imagem">✕</button>';
+  }
+
+  // Placeholder por tipo
+  var placeholderIcon = tipo === 'capa' ? '🎨' : (tipo === 'tela_final' ? '🏁' : '🖼️');
+  var placeholderText = tipo === 'capa' ? 'Capa do carrossel'
+                      : tipo === 'tela_final' ? 'Tela final do carrossel'
+                      : 'Clique para ativar';
+
+  // Footer: cards de produto têm searchable select; especiais só têm botão de arquivo
+  var footer;
+  if (tipo === 'produto') {
+    footer = '<div class="ss-wrap">' +
+               '<input type="text" class="ss-input" id="ss-input-' + i + '" placeholder="Buscar produto…" autocomplete="off">' +
+               '<div class="ss-dropdown" id="ss-dropdown-' + i + '"></div>' +
+             '</div>' +
+             '<button class="btn-arquivo" id="btn-arquivo-' + i + '" title="Selecionar arquivo">📁</button>';
+  } else {
+    footer = '<button class="btn-secondary" id="btn-arquivo-' + i + '" style="flex:1" title="Selecionar arquivo">📁 Selecionar arquivo</button>';
+  }
+
+  div.innerHTML =
+    '<div class="card-header">' +
+      '<span class="card-numero">' + headerLabel + '</span>' +
+      '<div class="card-header-actions" id="actions-' + i + '">' + acoes + '</div>' +
+      badge +
+    '</div>' +
+    '<div class="card-img-area" id="img-area-' + i + '">' +
+      '<img id="card-img-' + i + '" class="card-preview" style="display:none" alt="">' +
+      '<div class="card-placeholder" id="placeholder-' + i + '">' +
+        '<div class="placeholder-icon">' + placeholderIcon + '</div>' +
+        '<div class="placeholder-text">' + placeholderText + '</div>' +
+        '<div class="placeholder-hint">Ctrl+V · Selecionar arquivo</div>' +
+      '</div>' +
+      '<input type="file" id="file-' + i + '" accept="image/*" style="display:none">' +
+    '</div>' +
+    '<div class="card-footer">' + footer + '</div>';
+
+  // Listeners
+  (function(idx, t) {
+    div.querySelector('#img-area-' + idx).addEventListener('click', function() { ativarCard(idx); });
+    div.querySelector('#file-' + idx).addEventListener('change', function(e) {
+      if (e.target.files[0]) processarImagem(e.target.files[0], idx);
+    });
+    div.querySelector('#btn-arquivo-' + idx).addEventListener('click', function(e) {
+      e.stopPropagation();
+      ativarCard(idx);
+      document.getElementById('file-' + idx).click();
+    });
+    div.querySelector('#btn-clear-' + idx).addEventListener('click', function(e) {
+      e.stopPropagation();
+      limparImagem(idx);
+    });
+    if (t === 'produto') {
+      div.querySelector('#btn-reload-' + idx).addEventListener('click', function(e) {
+        e.stopPropagation();
+        recarregarImagemOriginal(idx);
+      });
+    }
+    // searchable select é configurado em renderizarGrid após inserção no DOM
+  })(i, tipo);
+
+  return div;
+}
+
+function ativarCard(index) {
+  document.querySelectorAll('.card-item').forEach(function(c) { c.classList.remove('ativo'); });
+  document.getElementById('card-' + index).classList.add('ativo');
+  App.cardAtivo = index;
+}
+
+function handlePaste(e) {
+  if (App.cardAtivo === null) return;
+  var tela1 = document.getElementById('tela-1');
+  if (!tela1.classList.contains('ativa')) return;
+
+  var items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].type.startsWith('image/')) {
+      e.preventDefault();
+      processarImagem(items[i].getAsFile(), App.cardAtivo);
+      return;
+    }
+  }
+}
+
+function processarImagem(file, cardIndex) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var dataUrl  = e.target.result;
+    var base64   = dataUrl.split(',')[1];
+    var mimeType = file.type || 'image/png';
+    // Nova imagem manual → não tem URL de origem; será subida ao Drive no salvar
+    App.cards[cardIndex].imagemOriginalUrl = null;
+    setCardImage(cardIndex, dataUrl, base64, mimeType);
+    showToast('Imagem definida no Card ' + (cardIndex + 1) + '.', 'success');
+  };
+  reader.readAsDataURL(file);
+}
+
+function setCardImage(cardIndex, dataUrl, base64, mimeType) {
+  App.cards[cardIndex].imagemDataUrl = dataUrl;
+  App.cards[cardIndex].imagemBase64  = base64;
+  App.cards[cardIndex].mimeType      = mimeType;
+
+  var img         = document.getElementById('card-img-' + cardIndex);
+  var placeholder = document.getElementById('placeholder-' + cardIndex);
+  var dot         = document.getElementById('dot-' + cardIndex);
+  var actions     = document.getElementById('actions-' + cardIndex);
+  var numero      = document.querySelector('#card-' + cardIndex + ' .card-numero');
+
+  img.src = dataUrl;
+  img.style.display = 'block';
+  placeholder.style.display = 'none';
+  if (dot)     { dot.textContent = '●'; dot.classList.add('ok'); }
+  if (actions) { actions.classList.add('visivel'); }
+
+  // Mostra/remove badge de fallback no label do card
+  if (numero) {
+    var badge = numero.querySelector('.badge-fallback');
+    if (App.cards[cardIndex].isFallback) {
+      if (!badge) {
+        var b = document.createElement('span');
+        b.className = 'badge-fallback';
+        b.title = 'Imagem vinda da coluna "Imagem" da aba Links. Será salva no Post Padrão ao avançar.';
+        b.textContent = 'fallback';
+        numero.appendChild(b);
+      }
+    } else {
+      if (badge) badge.remove();
+    }
+  }
+
+  verificarBotaoAvancar();
+}
+
+function limparImagem(cardIndex) {
+  App.cards[cardIndex].imagemDataUrl    = null;
+  App.cards[cardIndex].imagemBase64     = null;
+  App.cards[cardIndex].mimeType         = null;
+  App.cards[cardIndex].isFallback       = false;
+  App.cards[cardIndex].imagemOriginalUrl = null;
+
+  var img         = document.getElementById('card-img-' + cardIndex);
+  var placeholder = document.getElementById('placeholder-' + cardIndex);
+  var dot         = document.getElementById('dot-' + cardIndex);
+  var actions     = document.getElementById('actions-' + cardIndex);
+  var numero      = document.querySelector('#card-' + cardIndex + ' .card-numero');
+
+  img.src = ''; img.style.display = 'none';
+  placeholder.style.display = 'flex';
+  if (dot)     { dot.textContent = '○'; dot.classList.remove('ok'); }
+  if (actions) { actions.classList.remove('visivel'); }
+  if (numero)  { var b = numero.querySelector('.badge-fallback'); if (b) b.remove(); }
+
+  // Limpa o searchable select para cards de produto
+  var ssInput = document.getElementById('ss-input-' + cardIndex);
+  if (ssInput) ssInput.value = '';
+
+  // Reseta dados do produto no card
+  App.cards[cardIndex].itemId           = null;
+  App.cards[cardIndex].nome             = '';
+  App.cards[cardIndex].isFallback       = false;
+  App.cards[cardIndex].imagemOriginalUrl = null;
+
+  verificarBotaoAvancar();
+  showToast('Imagem removida do Card ' + (cardIndex + 1) + '.', 'info');
+}
+
+function recarregarImagemOriginal(index) {
+  var card = App.cards[index];
+  if (card.tipo !== 'produto') return;
+  if (!card.itemId) { showToast('Selecione um produto primeiro.', 'warn'); return; }
+
+  showLoading('Recarregando imagem original…');
+  apiFetch('getPostPadraoComBase64', { itemId: card.itemId })
+    .then(function(res) {
+      hideLoading();
+      if (res && res.imgBase64) {
+        App.cards[index].isFallback        = (res.fonte === 'links');
+        App.cards[index].imagemOriginalUrl  = res.imgUrl || null;
+        try {
+          App.cards[index].canvasObjects = (res.canvasObjects && res.canvasObjects.length > 2)
+            ? JSON.parse(res.canvasObjects) : [];
+        } catch(e) { App.cards[index].canvasObjects = []; }
+        var dataUrl = 'data:' + res.mimeType + ';base64,' + res.imgBase64;
+        setCardImage(index, dataUrl, res.imgBase64, res.mimeType);
+        var hasText = App.cards[index].canvasObjects.length > 0;
+        var msg = res.fonte === 'links'
+          ? 'Imagem da aba Links carregada (fallback).'
+          : ('Imagem original recarregada!' + (hasText ? ' Texto anterior restaurado.' : ''));
+        showToast(msg, 'success');
+      } else {
+        showToast('Nenhuma imagem cadastrada para este produto.', 'warn');
+      }
+    })
+    .catch(function(e) { hideLoading(); showToast('Erro: ' + e.message, 'error'); });
+}
+
+function handleSelecionarProduto(index, itemId) {
+  if (!itemId) {
+    App.cards[index].itemId = null;
+    App.cards[index].nome   = '';
+    verificarBotaoAvancar();
+    return;
+  }
+
+  var produto = App.produtos.find(function(p) { return String(p.item_id) === String(itemId); });
+  App.cards[index].itemId = itemId;
+  App.cards[index].nome   = produto ? produto.nome : '';
+
+  showLoading('Buscando imagem do produto…');
+
+  // Estágio 1 — POST_PADRAO (com fallback interno para LINKS via servidor)
+  apiFetch('getPostPadraoComBase64', { itemId: itemId })
+    .then(function(res) {
+      // Caso 1: servidor retornou base64 com sucesso
+      if (res && res.imgBase64) {
+        hideLoading();
+        App.cards[index].isFallback       = (res.fonte === 'links');
+        App.cards[index].imagemOriginalUrl = res.imgUrl || null;
+        // Restaura canvas objects salvos anteriormente para este produto
+        try {
+          App.cards[index].canvasObjects = (res.canvasObjects && res.canvasObjects.length > 2)
+            ? JSON.parse(res.canvasObjects) : [];
+        } catch(e) { App.cards[index].canvasObjects = []; }
+        var dataUrl = 'data:' + res.mimeType + ';base64,' + res.imgBase64;
+        setCardImage(index, dataUrl, res.imgBase64, res.mimeType);
+        var hasText = App.cards[index].canvasObjects.length > 0;
+        var msg = res.fonte === 'links'
+          ? 'Imagem carregada da aba Links (fallback). Será salva no Post Padrão ao avançar.'
+          : ('Imagem do produto carregada!' + (hasText ? ' Texto anterior restaurado.' : ''));
+        showToast(msg, res.fonte === 'links' ? 'warn' : 'success');
+        return;
+      }
+
+      // Caso 2: servidor retornou URL mas sem base64 — tenta fetchImageAsBase64
+      var urlParaTentar = (res && res.imgUrl) ? res.imgUrl
+                        : (produto && produto.imagem_url) ? produto.imagem_url
+                        : null;
+
+      if (!urlParaTentar) {
+        hideLoading();
+        showToast('Produto sem imagem cadastrada. Faça upload manualmente.', 'info');
+        return;
+      }
+
+      showLoading('Carregando imagem (tentativa 2)…');
+      return apiFetch('fetchImageAsBase64', { url: urlParaTentar })
+        .then(function(res2) {
+          hideLoading();
+          if (res2 && res2.imgBase64) {
+            App.cards[index].isFallback       = true;
+            App.cards[index].imagemOriginalUrl = urlParaTentar;
+            var dataUrl2 = 'data:' + res2.mimeType + ';base64,' + res2.imgBase64;
+            setCardImage(index, dataUrl2, res2.imgBase64, res2.mimeType);
+            showToast('Imagem carregada via fallback direto. Será salva no Post Padrão ao avançar.', 'warn');
+          } else {
+            showToast('Não foi possível carregar a imagem do produto. Faça upload manualmente.', 'info');
+          }
+        });
+    })
+    .catch(function(err) {
+      hideLoading();
+      var msg = (err && err.message) ? err.message : String(err);
+      showToast('Erro ao buscar imagem: ' + msg, 'error');
+      console.error('handleSelecionarProduto erro:', err);
+    });
+}
+
+function verificarBotaoAvancar() {
+  var ok = App.cards.length > 0 && App.cards.every(function(c) { return !!c.imagemBase64; });
+  document.getElementById('btn-avancar').disabled = !ok;
+}
+
+// ============================================================
+//  SEARCHABLE SELECT
+// ============================================================
+var MAX_SS_ITEMS = 60; // máximo de itens visíveis por vez
+
+function setupSearchableSelect(idx) {
+  var input    = document.getElementById('ss-input-' + idx);
+  var dropdown = document.getElementById('ss-dropdown-' + idx);
+  if (!input || !dropdown) return;
+
+  function posicionarDropdown() {
+    var rect = input.getBoundingClientRect();
+    dropdown.style.width = rect.width + 'px';
+    dropdown.style.left  = rect.left + 'px';
+    // Abre para baixo ou para cima dependendo do espaço disponível
+    var spaceBelow = window.innerHeight - rect.bottom;
+    var spaceAbove = rect.top;
+    if (spaceBelow >= 220 || spaceBelow >= spaceAbove) {
+      dropdown.style.top    = (rect.bottom + 2) + 'px';
+      dropdown.style.bottom = 'auto';
+    } else {
+      var h = Math.min(220, spaceAbove - 8);
+      dropdown.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
+      dropdown.style.top    = 'auto';
+      dropdown.style.maxHeight = h + 'px';
+    }
+  }
+
+  function renderDropdown(termo) {
+    var lower    = (termo || '').toLowerCase().trim();
+    var filtered = lower
+      ? App.produtos.filter(function(p) {
+          return String(p.item_id).toLowerCase().indexOf(lower) !== -1 ||
+                 p.nome.toLowerCase().indexOf(lower) !== -1 ||
+                 (p.categoria || '').toLowerCase().indexOf(lower) !== -1;
+        })
+      : App.produtos;
+
+    dropdown.innerHTML = '';
+
+    if (filtered.length === 0) {
+      dropdown.innerHTML = '<div class="ss-hint">Nenhum produto encontrado.</div>';
+      return;
+    }
+
+    var showing = filtered.slice(0, MAX_SS_ITEMS);
+    showing.forEach(function(p) {
+      var item = document.createElement('div');
+      item.className = 'ss-item';
+      item.textContent = p.item_id + ' - ' + p.nome;
+      item.title = p.item_id + ' - ' + p.nome + (p.categoria ? '  [' + p.categoria + ']' : '');
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault(); // evita blur antes do clique registrar
+        selectProduct(idx, p.item_id, p.item_id + ' - ' + p.nome);
+      });
+      dropdown.appendChild(item);
+    });
+
+    if (filtered.length > MAX_SS_ITEMS) {
+      var hint = document.createElement('div');
+      hint.className = 'ss-hint';
+      hint.textContent = (filtered.length - MAX_SS_ITEMS) + ' itens ocultos — continue digitando para filtrar.';
+      dropdown.appendChild(hint);
+    }
+  }
+
+  function abrirDropdown() {
+    posicionarDropdown();
+    renderDropdown(input.value);
+    dropdown.classList.add('aberto');
+  }
+
+  function fecharDropdown() {
+    dropdown.classList.remove('aberto');
+  }
+
+  input.addEventListener('focus', abrirDropdown);
+  input.addEventListener('input', function() {
+    posicionarDropdown();
+    renderDropdown(input.value);
+  });
+  input.addEventListener('blur', function() {
+    setTimeout(fecharDropdown, 160);
+  });
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { fecharDropdown(); input.blur(); }
+    if (e.key === 'Enter') {
+      var primeiro = dropdown.querySelector('.ss-item');
+      if (primeiro) primeiro.dispatchEvent(new MouseEvent('mousedown'));
+    }
+  });
+}
+
+function selectProduct(idx, itemId, label) {
+  var input    = document.getElementById('ss-input-' + idx);
+  var dropdown = document.getElementById('ss-dropdown-' + idx);
+  if (input)    input.value = label;
+  if (dropdown) dropdown.classList.remove('aberto');
+  handleSelecionarProduto(idx, itemId);
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ============================================================
+//  TELA 2 — EDITOR DE CANVAS
+// ============================================================
+
+// ---- Extensão: IText com fundo arredondado ----
+fabric.BgIText = fabric.util.createClass(fabric.IText, {
+  type:          'bg-i-text',
+  objectCaching: false,   // desativa cache para que _render seja sempre chamado
+  bgEnabled: false,
+  bgColor:   '#000000',
+  bgOpacity: 0.7,
+  bgPadding: 10,
+  bgRadius:  6,
+
+  initialize: function(text, options) {
+    options = options || {};
+    this.callSuper('initialize', text, options);
+    this.bgEnabled = options.bgEnabled !== undefined ? options.bgEnabled : false;
+    this.bgColor   = options.bgColor   || '#000000';
+    this.bgOpacity = options.bgOpacity !== undefined ? options.bgOpacity : 0.7;
+    this.bgPadding = options.bgPadding !== undefined ? options.bgPadding : 10;
+    this.bgRadius  = options.bgRadius  !== undefined ? options.bgRadius  : 6;
+  },
+
+  _render: function(ctx) {
+    if (this.bgEnabled) {
+      var pad = this.bgPadding;
+      var r   = this.bgRadius;
+      var w   = this.width  + pad * 2;
+      var h   = this.height + pad * 2;
+      var x   = -w / 2;
+      var y   = -h / 2;
+      ctx.save();
+      ctx.globalAlpha = this.bgOpacity !== undefined ? this.bgOpacity : 0.7;
+      ctx.fillStyle   = this.bgColor || '#000000';
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    this.callSuper('_render', ctx);
+  },
+
+  toObject: function() {
+    return fabric.util.object.extend(this.callSuper('toObject'), {
+      bgEnabled: this.bgEnabled,
+      bgColor:   this.bgColor,
+      bgOpacity: this.bgOpacity,
+      bgPadding: this.bgPadding,
+      bgRadius:  this.bgRadius
+    });
+  }
+});
+
+fabric.BgIText.fromObject = function(object, callback) {
+  return fabric.Object._fromObject('BgIText', object, callback, 'text');
+};
+
+function irParaTela2() {
+  showTela(2);
+  if (!App.t2Iniciado) {
+    inicializarEditor();
+    App.t2Iniciado = true;
+  } else {
+    carregarCardNoEditor(App.cardEditor);
+  }
+}
+
+function inicializarEditor() {
+  if (App.canvas) { App.canvas.dispose(); App.canvas = null; }
+
+  App.canvas = new fabric.Canvas('fabric-canvas', {
+    width: 500, height: 625,
+    selection: true,
+    preserveObjectStacking: true
+  });
+
+  setupToolbar();
+
+  document.getElementById('btn-card-prev').addEventListener('click', function() { navegarCardEditor(-1); });
+  document.getElementById('btn-card-next').addEventListener('click', function() { navegarCardEditor(1); });
+
+  function voltarT1() {
+    salvarEstadoCardAtual();
+    App.legenda = document.getElementById('textarea-legenda').value;
+    showTela(1);
+  }
+  document.getElementById('btn-voltar-t1').addEventListener('click', voltarT1);
+  document.getElementById('btn-voltar-t1-footer').addEventListener('click', voltarT1);
+  document.getElementById('btn-salvar-continuar').addEventListener('click', salvarEContinuar);
+
+  document.getElementById('textarea-legenda').value = App.legenda || App.legendaPadrao || '';
+
+  App.cardEditor = 0;
+  carregarCardNoEditor(0);
+}
+
+function setupToolbar() {
+  document.getElementById('btn-add-texto').addEventListener('click', adicionarTexto);
+
+  document.getElementById('input-cor').addEventListener('input', function(e) {
+    atualizarPropriedadeTexto('fill', e.target.value);
+  });
+  document.getElementById('input-tamanho').addEventListener('change', function(e) {
+    atualizarPropriedadeTexto('fontSize', parseInt(e.target.value) || 32);
+  });
+  document.getElementById('input-fonte').addEventListener('change', function(e) {
+    atualizarPropriedadeTexto('fontFamily', e.target.value);
+  });
+
+  document.getElementById('btn-negrito').addEventListener('click', function() {
+    var obj = App.canvas.getActiveObject();
+    if (!obj) return;
+    var isBold = obj.get('fontWeight') === 'bold';
+    obj.set('fontWeight', isBold ? 'normal' : 'bold');
+    this.classList.toggle('ativo', !isBold);
+    App.canvas.renderAll();
+  });
+  document.getElementById('btn-italico').addEventListener('click', function() {
+    var obj = App.canvas.getActiveObject();
+    if (!obj) return;
+    var isItalic = obj.get('fontStyle') === 'italic';
+    obj.set('fontStyle', isItalic ? 'normal' : 'italic');
+    this.classList.toggle('ativo', !isItalic);
+    App.canvas.renderAll();
+  });
+  document.getElementById('btn-sombra').addEventListener('click', function() {
+    var obj = App.canvas.getActiveObject();
+    if (!obj) return;
+    var hasShadow = !!obj.shadow;
+    obj.set('shadow', hasShadow ? null : new fabric.Shadow({ color: 'rgba(0,0,0,0.8)', blur: 6, offsetX: 2, offsetY: 2 }));
+    this.classList.toggle('ativo', !hasShadow);
+    App.canvas.renderAll();
+  });
+  document.getElementById('btn-remover-obj').addEventListener('click', function() {
+    var obj = App.canvas.getActiveObject();
+    if (obj) { App.canvas.remove(obj); App.canvas.renderAll(); }
+  });
+
+  // Atualiza toolbar ao selecionar objeto
+  App.canvas.on('selection:created', sincronizarToolbar);
+  App.canvas.on('selection:updated', sincronizarToolbar);
+  App.canvas.on('selection:cleared', function() {
+    document.getElementById('btn-negrito').classList.remove('ativo');
+    document.getElementById('btn-italico').classList.remove('ativo');
+    document.getElementById('btn-sombra').classList.remove('ativo');
+    document.getElementById('btn-bg-toggle').classList.remove('ativo');
+    document.getElementById('btn-bg-toggle').textContent = '◻ Sem fundo';
+    document.getElementById('bg-controls').style.display = 'none';
+  });
+
+  // Controles de fundo do texto
+  document.getElementById('btn-bg-toggle').addEventListener('click', function() {
+    var obj = App.canvas.getActiveObject();
+    if (!obj || obj.type !== 'bg-i-text') return;
+    obj.bgEnabled = !obj.bgEnabled;
+    // Ao ativar o fundo pela primeira vez, garante opacidade 100%
+    if (obj.bgEnabled) {
+      obj.bgOpacity = 1.0;
+      document.getElementById('input-bg-opacidade').value = 100;
+    }
+    this.textContent = obj.bgEnabled ? '■ Com fundo' : '◻ Sem fundo';
+    this.classList.toggle('ativo', obj.bgEnabled);
+    document.getElementById('bg-controls').style.display = obj.bgEnabled ? 'flex' : 'none';
+    obj.dirty = true; App.canvas.renderAll();
+  });
+  document.getElementById('input-bg-cor').addEventListener('input', function() {
+    var obj = App.canvas.getActiveObject();
+    if (obj && obj.type === 'bg-i-text') { obj.bgColor = this.value; obj.dirty = true; App.canvas.renderAll(); }
+  });
+  document.getElementById('input-bg-opacidade').addEventListener('input', function() {
+    var obj = App.canvas.getActiveObject();
+    if (obj && obj.type === 'bg-i-text') { obj.bgOpacity = (parseInt(this.value) || 0) / 100; obj.dirty = true; App.canvas.renderAll(); }
+  });
+  document.getElementById('input-bg-padding').addEventListener('input', function() {
+    var obj = App.canvas.getActiveObject();
+    if (obj && obj.type === 'bg-i-text') { obj.bgPadding = parseInt(this.value) || 0; obj.dirty = true; App.canvas.renderAll(); }
+  });
+  document.getElementById('input-bg-radius').addEventListener('input', function() {
+    var obj = App.canvas.getActiveObject();
+    if (obj && obj.type === 'bg-i-text') { obj.bgRadius = parseInt(this.value) || 0; obj.dirty = true; App.canvas.renderAll(); }
+  });
+
+  // Reposicionar imagem
+  document.getElementById('btn-reposicionar').addEventListener('click', ativarModoReposicionar);
+  document.getElementById('btn-confirmar-repos').addEventListener('click', confirmarReposicionar);
+  document.getElementById('btn-cancelar-repos').addEventListener('click', cancelarReposicionar);
+}
+
+// ============================================================
+//  REPOSICIONAR IMAGEM
+// ============================================================
+var RepositionMode = { ativo: false, imgObj: null, originalDataUrl: null, textosSalvos: [] };
+
+function ativarModoReposicionar() {
+  var card = App.cards[App.cardEditor];
+  if (!card.imagemDataUrl) { showToast('Nenhuma imagem para reposicionar.', 'warn'); return; }
+  if (RepositionMode.ativo) return;
+
+  RepositionMode.ativo           = true;
+  RepositionMode.originalDataUrl = card.imagemDataUrl;
+  // Salva os objetos de texto atuais para restaurar no cancelar/confirmar
+  RepositionMode.textosSalvos    = App.canvas.getObjects().map(function(o) { return o.toObject(); });
+
+  // Limpa o canvas completamente e redefine o fundo preto
+  App.canvas.clear();
+  App.canvas.setBackgroundColor('#000000', function() {});
+
+  // Adiciona a imagem como objeto móvel e escalável
+  fabric.Image.fromURL(card.imagemDataUrl, function(img) {
+    var scale = Math.max(500 / img.width, 625 / img.height);
+    img.set({
+      left: 250, top: 312, originX: 'center', originY: 'center',
+      scaleX: scale, scaleY: scale,
+      selectable: true, evented: true,
+      lockRotation: true, lockScalingFlip: true,
+      hasControls: true, hasBorders: true,
+      borderColor: '#E1306C', cornerColor: '#E1306C',
+      cornerSize: 14, transparentCorners: false
+    });
+    img.setControlsVisibility({ mtr: false }); // esconde controle de rotação
+    App.canvas.add(img);
+    App.canvas.setActiveObject(img);
+    App.canvas.renderAll();
+    RepositionMode.imgObj = img;
+  });
+
+  // Atualiza UI
+  document.getElementById('btn-reposicionar').style.display       = 'none';
+  document.getElementById('reposicionar-controls').style.display  = 'flex';
+  document.getElementById('btn-add-texto').disabled       = true;
+  document.getElementById('btn-salvar-continuar').disabled = true;
+  document.getElementById('btn-card-prev').disabled        = true;
+  document.getElementById('btn-card-next').disabled        = true;
+  showToast('Modo reposicionar ativo — mova e escale a imagem.', 'info');
+}
+
+function confirmarReposicionar() {
+  if (!RepositionMode.ativo || !RepositionMode.imgObj) return;
+
+  // Exporta o canvas com a imagem na nova posição (sem textos — canvas está limpo)
+  App.canvas.discardActiveObject();
+  App.canvas.renderAll();
+  var dataUrl = App.canvas.toDataURL({ format: 'png', multiplier: 1 });
+  var base64  = dataUrl.split(',')[1];
+
+  // Limpa e recarrega o card com a nova imagem + textos restaurados
+  App.canvas.clear();
+  App.canvas.setBackgroundColor('#000000', function() {});
+
+  fabric.Image.fromURL(dataUrl, function(bg) {
+    bg.set({ left: 0, top: 0, originX: 'left', originY: 'top', scaleX: 1, scaleY: 1 });
+    App.canvas.setBackgroundImage(bg, function() {
+      // Restaura os textos que existiam antes
+      if (RepositionMode.textosSalvos.length > 0) {
+        fabric.util.enlivenObjects(RepositionMode.textosSalvos, function(objs) {
+          objs.forEach(function(o) { App.canvas.add(o); });
+          App.canvas.renderAll();
+        });
+      } else {
+        App.canvas.renderAll();
+      }
+    });
+  });
+
+  // Atualiza estado do card
+  App.cards[App.cardEditor].imagemDataUrl     = dataUrl;
+  App.cards[App.cardEditor].imagemBase64      = base64;
+  App.cards[App.cardEditor].imagemOriginalUrl = null;
+  var thumb = document.getElementById('card-img-' + App.cardEditor);
+  if (thumb) thumb.src = dataUrl;
+
+  sairModoReposicionar();
+  showToast('Imagem reposicionada com sucesso!', 'success');
+}
+
+function cancelarReposicionar() {
+  if (!RepositionMode.ativo) return;
+
+  // Restaura o canvas original (imagem + textos)
+  App.canvas.clear();
+  App.canvas.setBackgroundColor('#000000', function() {});
+
+  fabric.Image.fromURL(RepositionMode.originalDataUrl, function(img) {
+    var scale = Math.max(500 / img.width, 625 / img.height);
+    img.set({ left: 250, top: 312, originX: 'center', originY: 'center', scaleX: scale, scaleY: scale });
+    App.canvas.setBackgroundImage(img, function() {
+      if (RepositionMode.textosSalvos.length > 0) {
+        fabric.util.enlivenObjects(RepositionMode.textosSalvos, function(objs) {
+          objs.forEach(function(o) { App.canvas.add(o); });
+          App.canvas.renderAll();
+        });
+      } else {
+        App.canvas.renderAll();
+      }
+    });
+  });
+
+  sairModoReposicionar();
+  showToast('Reposicionamento cancelado.', 'info');
+}
+
+function sairModoReposicionar() {
+  RepositionMode.ativo           = false;
+  RepositionMode.imgObj          = null;
+  RepositionMode.originalDataUrl = null;
+  RepositionMode.textosSalvos    = [];
+
+  document.getElementById('btn-reposicionar').style.display       = '';
+  document.getElementById('reposicionar-controls').style.display  = 'none';
+  document.getElementById('btn-add-texto').disabled       = false;
+  document.getElementById('btn-salvar-continuar').disabled = false;
+  document.getElementById('btn-card-prev').disabled        = (App.cardEditor === 0);
+  document.getElementById('btn-card-next').disabled        = (App.cardEditor === App.numCards - 1);
+}
+
+function sincronizarToolbar() {
+  var obj = App.canvas.getActiveObject();
+  if (!obj || (obj.type !== 'i-text' && obj.type !== 'bg-i-text')) return;
+  document.getElementById('input-cor').value     = obj.fill     || '#ffffff';
+  document.getElementById('input-tamanho').value = obj.fontSize || 32;
+  document.getElementById('input-fonte').value   = obj.fontFamily || 'Arial';
+  document.getElementById('btn-negrito').classList.toggle('ativo', obj.fontWeight === 'bold');
+  document.getElementById('btn-italico').classList.toggle('ativo', obj.fontStyle  === 'italic');
+  document.getElementById('btn-sombra').classList.toggle('ativo',  !!obj.shadow);
+
+  // Controles de fundo (apenas BgIText)
+  if (obj.type === 'bg-i-text') {
+    var bgOn = !!obj.bgEnabled;
+    document.getElementById('btn-bg-toggle').textContent = bgOn ? '■ Com fundo' : '◻ Sem fundo';
+    document.getElementById('btn-bg-toggle').classList.toggle('ativo', bgOn);
+    document.getElementById('bg-controls').style.display     = bgOn ? 'flex' : 'none';
+    document.getElementById('input-bg-cor').value            = obj.bgColor   || '#000000';
+    document.getElementById('input-bg-opacidade').value      = Math.round((obj.bgOpacity !== undefined ? obj.bgOpacity : 0.7) * 100);
+    document.getElementById('input-bg-padding').value        = obj.bgPadding !== undefined ? obj.bgPadding : 10;
+    document.getElementById('input-bg-radius').value         = obj.bgRadius  !== undefined ? obj.bgRadius  : 6;
+  } else {
+    document.getElementById('btn-bg-toggle').textContent = '◻ Sem fundo';
+    document.getElementById('btn-bg-toggle').classList.remove('ativo');
+    document.getElementById('bg-controls').style.display = 'none';
+  }
+}
+
+function atualizarPropriedadeTexto(prop, valor) {
+  var obj = App.canvas.getActiveObject();
+  if (obj) { obj.set(prop, valor); App.canvas.renderAll(); }
+}
+
+function adicionarTexto() {
+  var text = new fabric.BgIText('Texto aqui', {
+    left: 250, top: 312, originX: 'center', originY: 'center',
+    fill:       document.getElementById('input-cor').value      || '#ffffff',
+    fontSize:   parseInt(document.getElementById('input-tamanho').value) || 32,
+    fontFamily: document.getElementById('input-fonte').value    || 'Arial',
+    fontWeight: 'normal', fontStyle: 'normal',
+    shadow: null,
+    bgEnabled: false, bgColor: '#000000', bgOpacity: 1.0, bgPadding: 10, bgRadius: 6
+  });
+  App.canvas.add(text);
+  App.canvas.setActiveObject(text);
+  App.canvas.renderAll();
+  text.enterEditing();
+  text.selectAll();
+}
+
+function carregarCardNoEditor(index) {
+  App.cardEditor = index;
+  var card = App.cards[index];
+
+  document.getElementById('indicador-card').textContent = getLabelCard(index);
+  document.getElementById('btn-card-prev').disabled = (index === 0);
+  document.getElementById('btn-card-next').disabled = (index === App.numCards - 1);
+
+  App.canvas.clear();
+  App.canvas.setBackgroundColor('#000000', function() {});
+
+  if (!card.imagemDataUrl) { App.canvas.renderAll(); return; }
+
+  fabric.Image.fromURL(card.imagemDataUrl, function(img) {
+    // Escala para cobrir o canvas 500x625 (object-fit: cover, 4:5)
+    var scale = Math.max(500 / img.width, 625 / img.height);
+    img.set({ scaleX: scale, scaleY: scale, left: 250, top: 312, originX: 'center', originY: 'center' });
+    App.canvas.setBackgroundImage(img, function() {
+      // Recarrega objetos de texto salvos
+      if (card.canvasObjects && card.canvasObjects.length > 0) {
+        fabric.util.enlivenObjects(card.canvasObjects, function(objects) {
+          objects.forEach(function(obj) { App.canvas.add(obj); });
+          App.canvas.renderAll();
+        });
+      } else {
+        App.canvas.renderAll();
+      }
+    });
+  }, { crossOrigin: 'anonymous' });
+}
+
+function salvarEstadoCardAtual() {
+  if (!App.canvas) return;
+  // Salva apenas os objetos de texto (não o background)
+  App.cards[App.cardEditor].canvasObjects = App.canvas.getObjects().map(function(o) { return o.toObject(); });
+}
+
+function navegarCardEditor(direcao) {
+  salvarEstadoCardAtual();
+  var novo = App.cardEditor + direcao;
+  if (novo < 0 || novo >= App.numCards) return;
+  carregarCardNoEditor(novo);
+}
+
+async function salvarEContinuar() {
+  // Desabilita imediatamente para evitar cliques múltiplos
+  var btnSalvar = document.getElementById('btn-salvar-continuar');
+  btnSalvar.disabled = true;
+  btnSalvar.textContent = 'Processando…';
+
+  salvarEstadoCardAtual();
+  App.legenda = document.getElementById('textarea-legenda').value;
+
+  // Fase 1: Exportar todos os cards para o Drive (gera driveUrl em cada card)
+  try {
+    for (var i = 0; i < App.numCards; i++) {
+      showLoading('Exportando Card ' + (i + 1) + ' de ' + App.numCards + '…');
+      await exportarCardParaDrive(i);
+    }
+  } catch (e) {
+    hideLoading();
+    btnSalvar.disabled = false;
+    btnSalvar.textContent = 'Salvar e Continuar →';
+    showToast('Erro ao exportar imagens: ' + e.message, 'error');
+    return;
+  }
+
+  // Fase 2: Salvar SEMPRE a imagem mais recente usada + canvas objects no POST_PADRAO.
+  // Fazemos upload da imagem LIMPA (imagemBase64, sem texto) a cada post para garantir
+  // que o POST_PADRAO reflita exatamente o que foi usado — independente da origem.
+  for (var fi = 0; fi < App.numCards; fi++) {
+    var fc = App.cards[fi];
+    if (fc.tipo !== 'produto' || !fc.itemId || !fc.imagemBase64) continue;
+    var canvasJson = JSON.stringify(fc.canvasObjects || []);
+    try {
+      showLoading('Salvando imagem do produto ' + (fi + 1) + '…');
+      var nomeLimpo = 'post-padrao-' + fc.itemId + '-' + Date.now() + '.png';
+      var resUp = await apiFetch('uploadImagemBase64', { base64Data: fc.imagemBase64, mimeType: fc.mimeType || 'image/png', nomeArquivo: nomeLimpo });
+      if (resUp && resUp.sucesso) {
+        // Salva nova URL (imagem limpa) + canvas objects → sobrepõe sempre
+        await apiFetch('salvarImagemProduto', { itemId: fc.itemId, driveUrl: resUp.url, canvasObjectsJson: canvasJson });
+        App.cards[fi].imagemOriginalUrl = resUp.url;
+      } else {
+        // Upload falhou → pelo menos salva os canvas objects
+        await apiFetch('salvarCanvasObjects', { itemId: fc.itemId, canvasObjectsJson: canvasJson });
+      }
+      App.cards[fi].isFallback = false;
+    } catch (e) {
+      // não-crítico, segue em frente
+    }
+  }
+
+  hideLoading();
+  irParaTela3();
+}
+
+function exportarCardParaDrive(index) {
+  return new Promise(function(resolve, reject) {
+    var card = App.cards[index];
+    App.canvas.clear();
+    App.canvas.setBackgroundColor('#000000', function() {});
+
+    fabric.Image.fromURL(card.imagemDataUrl, function(img) {
+      var scale = Math.max(500 / img.width, 625 / img.height);
+      img.set({ scaleX: scale, scaleY: scale, left: 250, top: 312, originX: 'center', originY: 'center' });
+
+      App.canvas.setBackgroundImage(img, function() {
+        var objectsToLoad = (card.canvasObjects && card.canvasObjects.length > 0) ? card.canvasObjects : [];
+
+        function finalizarExport() {
+          App.canvas.renderAll();
+          // Exporta em 1080x1350 (500×2.16 = 1080, 625×2.16 = 1350) → formato 4:5
+          var dataUrl = App.canvas.toDataURL({ format: 'png', multiplier: 2.16 });
+          var base64  = dataUrl.split(',')[1];
+          App.cards[index].imagemExportadaBase64 = base64;
+
+          var nome = 'carrossel-card-' + (index + 1) + '-' + Date.now() + '.png';
+          apiFetch('uploadImagemBase64', { base64Data: base64, mimeType: 'image/png', nomeArquivo: nome })
+            .then(function(res) {
+              if (!res.sucesso) throw new Error(res.erro || 'Falha no upload');
+              App.cards[index].driveUrl = res.url;
+              resolve();
+            })
+            .catch(reject);
+        }
+
+        if (objectsToLoad.length === 0) {
+          finalizarExport();
+        } else {
+          fabric.util.enlivenObjects(objectsToLoad, function(objects) {
+            objects.forEach(function(o) { App.canvas.add(o); });
+            finalizarExport();
+          });
+        }
+      });
+    }, { crossOrigin: 'anonymous' });
+  });
+}
+
+// ============================================================
+//  TELA 3 — PREVIEW E AGENDAMENTO
+// ============================================================
+function irParaTela3() {
+  showTela(3);
+  inicializarPreview();
+}
+
+function inicializarPreview() {
+  App.cardPreview = 0;
+
+  // Data/hora padrão: 30 min a partir de agora
+  var d = new Date(Date.now() + 30 * 60 * 1000);
+  var pad = function(n) { return String(n).padStart(2, '0'); };
+  document.getElementById('input-data').value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  document.getElementById('input-hora').value = pad(d.getHours()) + ':' + pad(d.getMinutes());
+
+  // Dots
+  var dots = document.getElementById('ig-dots');
+  dots.innerHTML = '';
+  App.cards.forEach(function(_, i) {
+    var span = document.createElement('span');
+    span.className = 'dot' + (i === 0 ? ' ativo' : '');
+    dots.appendChild(span);
+  });
+
+  document.getElementById('ig-legenda-preview').textContent = App.legenda || '';
+
+  mostrarPreviewCard(0);
+
+  // Garante que o formulário esteja visível (caso venha de um agendamento anterior)
+  document.getElementById('bloco-agendamento').style.display = '';
+  document.getElementById('bloco-sucesso').classList.remove('visivel');
+
+  document.getElementById('ig-prev').addEventListener('click', function() { navegarPreview(-1); });
+  document.getElementById('ig-next').addEventListener('click', function() { navegarPreview(1); });
+  document.getElementById('btn-download').addEventListener('click', downloadTodosCards);
+  document.getElementById('btn-agendar').addEventListener('click', agendarPostagem);
+  document.getElementById('btn-config-t3').addEventListener('click', abrirModalConfig);
+  document.getElementById('btn-novo-post').addEventListener('click', function() {
+    // Reseta estado sem precisar de reload (evita tela branca no iframe do Apps Script)
+    App.numCards       = 0;
+    App.cards          = [];
+    App.cardAtivo      = null;
+    App.cardEditor     = 0;
+    App.cardPreview    = 0;
+    App.legenda        = '';
+    App.editandoPostId = null;
+    App.t2Iniciado     = false;
+    App.temCapa        = false;
+    App.temTelaFinal   = false;
+    if (App.canvas) { App.canvas.dispose(); App.canvas = null; }
+
+    document.getElementById('grid-cards').innerHTML  = '';
+    document.getElementById('input-num-cards').value = 3;
+    document.getElementById('btn-add-capa').classList.remove('ativo');
+    document.getElementById('btn-add-final').classList.remove('ativo');
+    document.getElementById('btn-avancar').disabled = true;
+
+    showTela(1);
+  });
+  document.getElementById('btn-voltar-t2').addEventListener('click', function() {
+    showTela(2);
+    carregarCardNoEditor(App.cardEditor);
+  });
+}
+
+function mostrarPreviewCard(index) {
+  var card = App.cards[index];
+  var img  = document.getElementById('ig-preview-img');
+
+  // Usa o base64 exportado (já em memória, sem CORS nem redirect do Drive)
+  // Fallback para a imagem original caso o export ainda não tenha ocorrido
+  if (card.imagemExportadaBase64) {
+    img.src = 'data:image/png;base64,' + card.imagemExportadaBase64;
+  } else if (card.imagemDataUrl) {
+    img.src = card.imagemDataUrl;
+  } else {
+    img.src = '';
+  }
+
+  document.querySelectorAll('#ig-dots .dot').forEach(function(d, i) {
+    d.classList.toggle('ativo', i === index);
+  });
+
+  document.getElementById('ig-prev').style.opacity = index === 0 ? '0' : '1';
+  document.getElementById('ig-next').style.opacity = index === App.numCards - 1 ? '0' : '1';
+  document.getElementById('ig-prev').style.pointerEvents = index === 0 ? 'none' : 'auto';
+  document.getElementById('ig-next').style.pointerEvents = index === App.numCards - 1 ? 'none' : 'auto';
+}
+
+function navegarPreview(direcao) {
+  var novo = App.cardPreview + direcao;
+  if (novo < 0 || novo >= App.numCards) return;
+  App.cardPreview = novo;
+  mostrarPreviewCard(novo);
+}
+
+function downloadTodosCards() {
+  var baixados = 0;
+  App.cards.forEach(function(card, i) {
+    var b64 = card.imagemExportadaBase64;
+    if (!b64) return;
+    setTimeout(function() {
+      var a = document.createElement('a');
+      a.href = 'data:image/png;base64,' + b64;
+      a.download = 'carrossel-card-' + (i + 1) + '.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      baixados++;
+      if (baixados === App.cards.length) showToast(App.numCards + ' cards baixados!', 'success');
+    }, i * 600);
+  });
+}
+
+async function agendarPostagem() {
+  var data = document.getElementById('input-data').value;
+  var hora = document.getElementById('input-hora').value;
+
+  if (!data || !hora) { showToast('Informe data e hora da publicação.', 'warn'); return; }
+
+  var scheduledAt = new Date(data + 'T' + hora + ':00');
+  var agora       = new Date();
+
+  if (scheduledAt <= agora) { showToast('A data/hora deve ser no futuro.', 'warn'); return; }
+  if (scheduledAt < new Date(agora.getTime() + 20 * 60 * 1000)) {
+    showToast('Instagram exige mínimo 20 minutos de antecedência.', 'warn'); return;
+  }
+
+  var payload = {
+    titulo:      'Carrossel ' + agora.toLocaleDateString('pt-BR'),
+    cards_json:  App.cards.map(function(c) {
+      return {
+        tipo:                c.tipo,
+        item_id:             c.itemId,
+        nome:                c.nome,
+        imagem_url:          c.driveUrl,
+        imagem_original_url: c.imagemOriginalUrl,
+        canvas_objects:      c.canvasObjects
+      };
+    }),
+    legenda:      App.legenda,
+    scheduled_at: scheduledAt.toISOString()
+  };
+
+  var modoEdicao = !!App.editandoPostId;
+
+  showLoading(modoEdicao ? 'Salvando alterações…' : 'Agendando postagem…');
+  try {
+    var res = modoEdicao
+      ? await apiFetch('atualizarPostFila', { postId: App.editandoPostId, payload: payload })
+      : await apiFetch('salvarNaFila', { payload: payload });
+
+    hideLoading();
+    if (res && res.sucesso) {
+      App.editandoPostId = null;
+      var dataFormatada = scheduledAt.toLocaleString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      });
+      document.getElementById('sucesso-data-hora').textContent = dataFormatada;
+      // Atualiza texto do label de sucesso conforme contexto
+      var labelEl = document.querySelector('.agenda-sucesso-label');
+      if (labelEl) labelEl.textContent = modoEdicao
+        ? 'Post atualizado com sucesso para o dia'
+        : 'Post agendado com sucesso para o dia';
+      document.getElementById('bloco-agendamento').style.display = 'none';
+      document.getElementById('bloco-sucesso').classList.add('visivel');
+    }
+  } catch (e) {
+    hideLoading();
+    showToast('Erro ao agendar: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+//  TELA 4 — CALENDÁRIO DE POSTS
+// ============================================================
+var CalState = { ano: 0, mes: 0, posts: [] };
+
+var CAL_MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+                 'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+var CAL_DIAS  = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+function irParaTela4() {
+  showTela(4);
+  var agora = new Date();
+  CalState.ano = agora.getFullYear();
+  CalState.mes = agora.getMonth();
+
+  // Listeners de navegação (adicionados apenas na primeira vez)
+  if (!CalState._listenersOk) {
+    CalState._listenersOk = true;
+    document.getElementById('cal-prev').addEventListener('click', function() {
+      CalState.mes--;
+      if (CalState.mes < 0) { CalState.mes = 11; CalState.ano--; }
+      renderCalendario();
+    });
+    document.getElementById('cal-next').addEventListener('click', function() {
+      CalState.mes++;
+      if (CalState.mes > 11) { CalState.mes = 0; CalState.ano++; }
+      renderCalendario();
+    });
+    document.getElementById('btn-voltar-t4').addEventListener('click', function() { showTela(1); });
+    document.getElementById('btn-novo-post-cal').addEventListener('click', function() { showTela(1); });
+  }
+
+  showLoading('Carregando calendário…');
+  apiFetch('getPostsCalendario')
+    .then(function(posts) {
+      hideLoading();
+      CalState.posts = posts || [];
+      renderCalendario();
+    })
+    .catch(function(e) {
+      hideLoading();
+      showToast('Erro ao carregar calendário: ' + e.message, 'error');
+    });
+}
+
+function renderCalendario() {
+  document.getElementById('cal-mes-ano').textContent = CAL_MESES[CalState.mes] + ' ' + CalState.ano;
+
+  var grid  = document.getElementById('cal-grid');
+  grid.innerHTML = '';
+
+  // Cabeçalho dos dias da semana
+  CAL_DIAS.forEach(function(d) {
+    var el = document.createElement('div');
+    el.className = 'cal-cabecalho';
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  var primeiroDia    = new Date(CalState.ano, CalState.mes, 1);
+  var ultimoDia      = new Date(CalState.ano, CalState.mes + 1, 0);
+  var hoje           = new Date();
+  var inicioDaSemana = primeiroDia.getDay(); // 0 = Dom
+
+  // Dias do mês anterior para completar a primeira linha
+  for (var p = inicioDaSemana - 1; p >= 0; p--) {
+    var dAnt = new Date(CalState.ano, CalState.mes, -p);
+    grid.appendChild(criarCelulaDia(dAnt, true, false));
+  }
+
+  // Dias do mês atual
+  for (var d = 1; d <= ultimoDia.getDate(); d++) {
+    var data   = new Date(CalState.ano, CalState.mes, d);
+    var isHoje = data.getFullYear() === hoje.getFullYear() &&
+                 data.getMonth()    === hoje.getMonth()    &&
+                 data.getDate()     === hoje.getDate();
+    grid.appendChild(criarCelulaDia(data, false, isHoje));
+  }
+
+  // Dias do mês seguinte para completar a última linha
+  var ultimoDiaSemana = ultimoDia.getDay();
+  for (var n = 1; n <= (6 - ultimoDiaSemana); n++) {
+    var dProx = new Date(CalState.ano, CalState.mes + 1, n);
+    grid.appendChild(criarCelulaDia(dProx, true, false));
+  }
+}
+
+function criarCelulaDia(data, outroMes, isHoje) {
+  var div = document.createElement('div');
+  div.className = 'cal-dia' + (outroMes ? ' outro-mes' : '') + (isHoje ? ' hoje' : '');
+
+  var num = document.createElement('div');
+  num.className = 'cal-dia-numero';
+  num.textContent = data.getDate();
+  div.appendChild(num);
+
+  // Filtra posts deste dia
+  CalState.posts.forEach(function(post) {
+    var postDate = new Date(post.scheduledAt);
+    if (postDate.getFullYear() === data.getFullYear() &&
+        postDate.getMonth()    === data.getMonth()    &&
+        postDate.getDate()     === data.getDate()) {
+      div.appendChild(criarItemPost(post, postDate));
+    }
+  });
+
+  return div;
+}
+
+function criarItemPost(post, postDate) {
+  var el    = document.createElement('div');
+  var st    = (post.status || 'agendado').toLowerCase();
+  var stCss = st === 'publicado' ? 'publicado'
+            : st === 'publicando' ? 'publicando'
+            : st === 'erro' ? 'erro'
+            : 'agendado';
+  el.className = 'cal-post ' + stCss;
+  el.title = postDate.toLocaleString('pt-BR') + ' · ' + post.status;
+
+  if (post.primeiraImagem) {
+    var img = document.createElement('img');
+    img.src = post.primeiraImagem;
+    img.alt = '';
+    img.onerror = function() { this.style.display = 'none'; };
+    el.appendChild(img);
+  }
+
+  var hora = document.createElement('span');
+  hora.className = 'cal-post-hora';
+  hora.textContent = ('0' + postDate.getHours()).slice(-2) + ':' + ('0' + postDate.getMinutes()).slice(-2);
+  el.appendChild(hora);
+
+  el.addEventListener('click', function() { abrirPreviewPost(post, postDate); });
+
+  return el;
+}
+
+// ============================================================
+//  MODAL PREVIEW CALENDÁRIO
+// ============================================================
+var CalPreview = { post: null, postDate: null, cardIndex: 0, imagens: [], imagensBase64: [] };
+
+function abrirPreviewPost(post, postDate) {
+  CalPreview.post         = post;
+  CalPreview.postDate     = postDate;
+  CalPreview.cardIndex    = 0;
+
+  // Extrai todas as imagens dos cards do post
+  var imagens = [];
+  try {
+    var cards = JSON.parse(post.cardsJson || '[]');
+    cards.forEach(function(c) { if (c.imagem_url) imagens.push(c.imagem_url); });
+  } catch(e) {}
+  CalPreview.imagens      = imagens;
+  CalPreview.imagensBase64 = new Array(imagens.length).fill(null);
+
+  // Painel direito: data/hora, status, título, cards, legenda
+  document.getElementById('cal-p-tempo').textContent = postDate.toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  });
+  var statusMap = {
+    agendado:   '🕐 Agendado',
+    publicado:  '✅ Publicado',
+    publicando: '⏳ Publicando…',
+    erro:       '❌ Erro'
+  };
+  var st = (post.status || 'agendado').toLowerCase();
+  document.getElementById('cal-p-status-label').textContent = statusMap[st] || post.status;
+  document.getElementById('cal-p-titulo').textContent       = post.titulo  || '—';
+  document.getElementById('cal-p-num-cards').textContent    = imagens.length + ' card' + (imagens.length !== 1 ? 's' : '');
+  document.getElementById('cal-p-legenda-right').textContent = post.legenda || '(sem legenda)';
+
+  // Legenda no mock Instagram
+  document.getElementById('cal-p-legenda').textContent = post.legenda || '';
+
+  // Dots
+  var dotsEl = document.getElementById('cal-p-dots');
+  dotsEl.innerHTML = '';
+  imagens.forEach(function(_, i) {
+    var dot = document.createElement('div');
+    dot.className = 'dot' + (i === 0 ? ' ativo' : '');
+    dotsEl.appendChild(dot);
+  });
+
+  // Reseta imagem e mostra loading
+  document.getElementById('cal-p-img').src = '';
+  document.getElementById('cal-p-img-loading').style.display = 'flex';
+
+  // Abre o modal e carrega a primeira imagem
+  document.getElementById('modal-cal-preview').classList.add('aberto');
+  mostrarPreviewModalCard(0, imagens);
+}
+
+function fecharModalCalPreview() {
+  document.getElementById('modal-cal-preview').classList.remove('aberto');
+  CalPreview.post = null;
+}
+
+function carregarImagemModalCal(index) {
+  var url = CalPreview.imagens[index];
+  if (!url) {
+    document.getElementById('cal-p-img-loading').style.display = 'none';
+    return;
+  }
+  // Já está em cache — usa direto
+  if (CalPreview.imagensBase64[index]) {
+    document.getElementById('cal-p-img').src = CalPreview.imagensBase64[index];
+    document.getElementById('cal-p-img-loading').style.display = 'none';
+    return;
+  }
+  // Carrega via proxy do servidor (evita CORS / redirect do Drive)
+  document.getElementById('cal-p-img-loading').style.display = 'flex';
+  apiFetch('fetchImageAsBase64', { url: url })
+    .then(function(res) {
+      if (CalPreview.cardIndex !== index) return; // usuário já navegou
+      if (res && res.imgBase64) {
+        var dataUrl = 'data:' + res.mimeType + ';base64,' + res.imgBase64;
+        CalPreview.imagensBase64[index] = dataUrl;
+        document.getElementById('cal-p-img').src = dataUrl;
+      }
+      document.getElementById('cal-p-img-loading').style.display = 'none';
+    })
+    .catch(function() {
+      if (CalPreview.cardIndex === index) {
+        document.getElementById('cal-p-img-loading').style.display = 'none';
+      }
+    });
+}
+
+function mostrarPreviewModalCard(index, imagens) {
+  var total = imagens.length;
+  CalPreview.cardIndex = index;
+
+  carregarImagemModalCal(index);
+
+  document.querySelectorAll('#cal-p-dots .dot').forEach(function(d, i) {
+    d.classList.toggle('ativo', i === index);
+  });
+
+  var prevBtn = document.getElementById('cal-p-prev');
+  var nextBtn = document.getElementById('cal-p-next');
+  var isFirst = index === 0;
+  var isLast  = index >= total - 1 || total === 0;
+  prevBtn.style.opacity       = isFirst ? '0' : '1';
+  prevBtn.style.pointerEvents = isFirst ? 'none' : 'auto';
+  nextBtn.style.opacity       = isLast  ? '0' : '1';
+  nextBtn.style.pointerEvents = isLast  ? 'none' : 'auto';
+}
+
+document.getElementById('btn-fechar-cal-p').addEventListener('click', fecharModalCalPreview);
+
+document.getElementById('modal-cal-preview').addEventListener('click', function(e) {
+  if (e.target === this) fecharModalCalPreview();
+});
+
+document.getElementById('cal-p-prev').addEventListener('click', function(e) {
+  e.stopPropagation();
+  if (CalPreview.cardIndex > 0) {
+    mostrarPreviewModalCard(CalPreview.cardIndex - 1, CalPreview.imagens);
+  }
+});
+
+document.getElementById('cal-p-next').addEventListener('click', function(e) {
+  e.stopPropagation();
+  if (CalPreview.cardIndex < CalPreview.imagens.length - 1) {
+    mostrarPreviewModalCard(CalPreview.cardIndex + 1, CalPreview.imagens);
+  }
+});
+
+document.getElementById('btn-excluir-cal-p').addEventListener('click', async function() {
+  var post = CalPreview.post;
+  if (!post) return;
+
+  // Confirmação visual: muda o botão para confirmar
+  var btn = this;
+  if (btn.dataset.aguardando !== 'sim') {
+    btn.dataset.aguardando = 'sim';
+    btn.textContent = '⚠️ Confirmar exclusão';
+    btn.style.background = 'var(--error)';
+    btn.style.color = '#fff';
+    setTimeout(function() {
+      if (btn.dataset.aguardando === 'sim') {
+        btn.dataset.aguardando = '';
+        btn.textContent = '🗑 Excluir';
+        btn.style.background = '';
+        btn.style.color = '';
+      }
+    }, 3000);
+    return;
+  }
+
+  btn.dataset.aguardando = '';
+  btn.textContent = '🗑 Excluir';
+  btn.style.background = '';
+  btn.style.color = '';
+
+  showLoading('Excluindo post…');
+  try {
+    var res = await apiFetch('excluirPostFila', { postId: post.id });
+    hideLoading();
+    if (res && res.sucesso) {
+      CalState.posts = CalState.posts.filter(function(p) { return p.id !== post.id; });
+      renderCalendario();
+      fecharModalCalPreview();
+      showToast('Post excluído com sucesso.', 'success');
+    } else {
+      showToast('Erro: ' + (res && res.erro ? res.erro : 'Não foi possível excluir.'), 'error');
+    }
+  } catch(e) {
+    hideLoading();
+    showToast('Erro ao excluir: ' + e.message, 'error');
+  }
+});
+
+document.getElementById('btn-editar-cal-p').addEventListener('click', function() {
+  var post = CalPreview.post;
+  if (!post) return;
+  fecharModalCalPreview();
+  carregarPostParaEdicao(post);
+});
+
+async function carregarPostParaEdicao(post) {
+  // Parse dos cards salvos no post agendado
+  var savedCards = [];
+  try {
+    savedCards = JSON.parse(post.cardsJson || '[]');
+  } catch(e) {
+    showToast('Erro ao ler dados do post.', 'error');
+    return;
+  }
+  if (savedCards.length === 0) {
+    showToast('Post sem cards para editar.', 'warn');
+    return;
+  }
+
+  // Reseta estado completo (igual ao "Criar novo post")
+  App.numCards       = 0;
+  App.cards          = [];
+  App.cardAtivo      = null;
+  App.cardEditor     = 0;
+  App.cardPreview    = 0;
+  App.legenda        = post.legenda || '';
+  App.editandoPostId = post.id;
+  App.t2Iniciado     = false;
+  App.temCapa        = false;
+  App.temTelaFinal   = false;
+  if (App.canvas) { App.canvas.dispose(); App.canvas = null; }
+
+  // Reconstrói App.cards a partir dos dados do post
+  savedCards.forEach(function(sc) {
+    var tipo = sc.tipo || 'produto';
+    var card = novoCard(tipo);
+    card.itemId            = sc.item_id            || null;
+    card.nome              = sc.nome               || '';
+    card.driveUrl          = sc.imagem_url          || null;
+    card.imagemOriginalUrl = sc.imagem_original_url || sc.imagem_url || null;
+    try {
+      card.canvasObjects = sc.canvas_objects
+        ? (typeof sc.canvas_objects === 'string'
+            ? JSON.parse(sc.canvas_objects)
+            : sc.canvas_objects)
+        : [];
+    } catch(e2) { card.canvasObjects = []; }
+    App.cards.push(card);
+  });
+
+  App.temCapa      = App.cards.some(function(c) { return c.tipo === 'capa'; });
+  App.temTelaFinal = App.cards.some(function(c) { return c.tipo === 'tela_final'; });
+
+  // Atualiza UI da Tela 1
+  document.getElementById('btn-add-capa').classList.toggle('ativo', App.temCapa);
+  document.getElementById('btn-add-final').classList.toggle('ativo', App.temTelaFinal);
+  document.getElementById('input-num-cards').value =
+    App.cards.filter(function(c) { return c.tipo === 'produto'; }).length;
+  document.getElementById('grid-cards').innerHTML = '';
+
+  showTela(1);
+  renderizarGrid();
+
+  // Carrega imagens limpas de cada card via proxy do servidor
+  showLoading('Carregando imagens do post…');
+  var total  = App.cards.length;
+  var loaded = 0;
+
+  function onCardLoaded() {
+    loaded++;
+    if (loaded >= total) {
+      hideLoading();
+      verificarBotaoAvancar();
+      showToast('Post carregado para edição. Avance para editar os cards.', 'success');
+    }
+  }
+
+  App.cards.forEach(function(card, idx) {
+    // Cards de produto: busca a imagem LIMPA (sem texto embutido) via POST_PADRAO
+    if (card.tipo === 'produto' && card.itemId) {
+      apiFetch('getPostPadraoComBase64', { itemId: card.itemId })
+        .then(function(res) {
+          if (res && res.imgBase64) {
+            var dataUrl = 'data:' + res.mimeType + ';base64,' + res.imgBase64;
+            setCardImage(idx, dataUrl, res.imgBase64, res.mimeType);
+            // canvas_objects do agendamento tem prioridade sobre o POST_PADRAO
+            // (já foram definidos em App.cards[idx].canvasObjects durante o parse acima)
+          } else if (card.imagemOriginalUrl) {
+            // Fallback: tenta a URL original salva no agendamento
+            return apiFetch('fetchImageAsBase64', { url: card.imagemOriginalUrl })
+              .then(function(res2) {
+                if (res2 && res2.imgBase64) {
+                  var dataUrl2 = 'data:' + res2.mimeType + ';base64,' + res2.imgBase64;
+                  setCardImage(idx, dataUrl2, res2.imgBase64, res2.mimeType);
+                }
+              });
+          }
+        })
+        .then(onCardLoaded)
+        .catch(function() { onCardLoaded(); });
+      return;
+    }
+
+    // Cards de capa / tela_final: usa imagem_original_url (upload original, sem texto)
+    var url = card.imagemOriginalUrl || card.driveUrl;
+    if (!url) { onCardLoaded(); return; }
+
+    apiFetch('fetchImageAsBase64', { url: url })
+      .then(function(res) {
+        if (res && res.imgBase64) {
+          var dataUrl = 'data:' + res.mimeType + ';base64,' + res.imgBase64;
+          setCardImage(idx, dataUrl, res.imgBase64, res.mimeType);
+        }
+        onCardLoaded();
+      })
+      .catch(function() { onCardLoaded(); });
+  });
+}
+
+// ============================================================
+//  MODAL CONFIGURAÇÕES
+// ============================================================
+function abrirModalConfig() {
+  document.getElementById('modal-config').classList.add('aberto');
+  document.getElementById('input-token').value      = '';
+  document.getElementById('input-app-secret').value = '';
+  apiFetch('getConfiguracoes').then(function(cfg) {
+    if (!cfg) return;
+    if (cfg.igUserId)                document.getElementById('input-user-id').value                  = cfg.igUserId;
+    if (cfg.igAppId)                 document.getElementById('input-app-id').value                   = cfg.igAppId;
+    if (cfg.cloudinaryCloudName)     document.getElementById('input-cloudinary-cloud-name').value    = cfg.cloudinaryCloudName;
+    if (cfg.cloudinaryUploadPreset)  document.getElementById('input-cloudinary-upload-preset').value = cfg.cloudinaryUploadPreset;
+    if (cfg.legendaPadrao)           document.getElementById('input-legenda-padrao').value           = cfg.legendaPadrao;
+    // Mostra status do token
+    var hint = document.getElementById('hint-token-status');
+    hint.textContent = cfg.tokenConfigurado
+      ? '✅ Token salvo. Deixe em branco para manter o atual.'
+      : 'Token de longa duração da conta Business. Nunca é exibido após salvo.';
+  });
+}
+
+// Navegação entre abas da sidebar
+document.querySelectorAll('.modal-sidebar-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var alvo = this.dataset.painel;
+    document.querySelectorAll('.modal-sidebar-btn').forEach(function(b) { b.classList.remove('ativo'); });
+    document.querySelectorAll('.modal-painel').forEach(function(p) { p.classList.remove('ativo'); });
+    this.classList.add('ativo');
+    document.getElementById('painel-' + alvo).classList.add('ativo');
+  });
+});
+
+function fecharModalConfig() {
+  document.getElementById('modal-config').classList.remove('aberto');
+}
+document.getElementById('btn-fechar-modal').addEventListener('click', fecharModalConfig);
+document.getElementById('btn-cancelar-config').addEventListener('click', fecharModalConfig);
+document.getElementById('modal-config').addEventListener('click', function(e) {
+  if (e.target === this) fecharModalConfig();
+});
+
+document.getElementById('btn-renovar-token').addEventListener('click', async function() {
+  var btn = this;
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  try {
+    var res = await apiFetch('renovarTokenFrontend');
+    if (res && res.sucesso) {
+      showToast(res.mensagem, 'success');
+      document.getElementById('hint-token-status').textContent = '✅ ' + res.mensagem;
+    } else {
+      showToast('Erro: ' + (res ? res.erro : 'resposta inválida'), 'error');
+    }
+  } catch (e) {
+    showToast('Erro: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Renovar';
+  }
+});
+
+document.getElementById('btn-salvar-config').addEventListener('click', async function() {
+  var token          = document.getElementById('input-token').value.trim();
+  var userId         = document.getElementById('input-user-id').value.trim();
+  var appId          = document.getElementById('input-app-id').value.trim();
+  var appSecret      = document.getElementById('input-app-secret').value.trim();
+  var cloudName      = document.getElementById('input-cloudinary-cloud-name').value.trim();
+  var uploadPreset   = document.getElementById('input-cloudinary-upload-preset').value.trim();
+  var legendaPad     = document.getElementById('input-legenda-padrao').value;
+  if (!userId) { showToast('Informe o Instagram User ID.', 'warn'); return; }
+
+  showLoading('Salvando configurações…');
+  try {
+    var config = { IG_USER_ID: userId, LEGENDA_PADRAO: legendaPad };
+    if (token)        config.IG_ACCESS_TOKEN           = token;
+    if (appId)        config.IG_APP_ID                 = appId;
+    if (appSecret)    config.IG_APP_SECRET              = appSecret;
+    if (cloudName)    config.CLOUDINARY_CLOUD_NAME      = cloudName;
+    if (uploadPreset) config.CLOUDINARY_UPLOAD_PRESET   = uploadPreset;
+    await apiFetch('salvarConfiguracoes', { config: config });
+    App.legendaPadrao = legendaPad; // atualiza estado local
+    hideLoading();
+    showToast('Configurações salvas!', 'success');
+    document.getElementById('modal-config').classList.remove('aberto');
+  } catch (e) {
+    hideLoading();
+    showToast('Erro: ' + e.message, 'error');
+  }
+});
+</script>
+</body>
+</html>
