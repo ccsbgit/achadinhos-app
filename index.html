@@ -2517,7 +2517,7 @@ function _carregarImagem(src) {
 /**
  * Envia um vídeo para o Cloudinary.
  * @param {Blob|string} blob     - Blob WebM (com texto) ou dataUrl string (sem texto)
- * @param {boolean}     needsMp4 - true = blob é WebM e precisa de conversão eager para H.264 MP4
+ * @param {boolean}     needsMp4 - true = blob é WebM, precisa de conversão para H.264 MP4
  * Retorna a URL HTTPS do vídeo final (já em MP4 quando needsMp4=true).
  */
 async function uploadVideoCloudinary(blob, needsMp4) {
@@ -2533,14 +2533,6 @@ async function uploadVideoCloudinary(blob, needsMp4) {
   var form = new FormData();
   form.append('file',          blob);
   form.append('upload_preset', uploadPreset);
-
-  if (needsMp4) {
-    // Pede conversão síncrona para H.264 MP4 durante o upload.
-    // O Instagram exige MP4/H.264; WebM não é aceito.
-    // eager_async=false = aguarda a transcodificação antes de retornar.
-    form.append('eager',        'f_mp4,vc_h264');
-    form.append('eager_async',  'false');
-  }
 
   var resp = await fetch(
     'https://api.cloudinary.com/v1_1/' + cloudName + '/auto/upload',
@@ -2558,12 +2550,45 @@ async function uploadVideoCloudinary(blob, needsMp4) {
     throw new Error('Cloudinary: ' + msg);
   }
 
-  // Se pediu eager, usa a URL já transcodificada (MP4/H.264 pronto)
-  if (needsMp4 && json.eager && json.eager[0]) {
-    return json.eager[0].secure_url || json.eager[0].url;
-  }
+  var baseUrl = json.secure_url || json.url;
 
-  return json.secure_url || json.url;
+  if (!needsMp4) return baseUrl;
+
+  // O preset unsigned não permite eager_async. Alternativa: inserir a transformação
+  // na URL e aguardar (polling) até o Cloudinary terminar de transcodificar.
+  // Cloudinary transcodifica lazy na 1ª requisição e armazena em cache.
+  var mp4Url = baseUrl.replace('/upload/', '/upload/f_mp4,vc_h264/');
+
+  document.getElementById('loading-msg').textContent = 'Aguardando conversão para MP4…';
+  await _aguardarUrlPronta(mp4Url, 30, 2000);  // até 30 tentativas, 2 s entre cada
+
+  return mp4Url;
+}
+
+/**
+ * Faz polling em uma URL até ela retornar Content-Type video/* com status 200.
+ * Necessário para esperar o Cloudinary terminar a transcodificação lazy WebM→MP4.
+ * @param {string} url       - URL a testar
+ * @param {number} maxTries  - Número máximo de tentativas
+ * @param {number} intervalo - Milissegundos entre tentativas
+ */
+async function _aguardarUrlPronta(url, maxTries, intervalo) {
+  for (var i = 0; i < maxTries; i++) {
+    try {
+      var r = await fetch(url, { method: 'HEAD' });
+      if (r.ok) {
+        var ct = r.headers.get('content-type') || '';
+        if (ct.startsWith('video/')) return;  // pronto!
+      }
+    } catch(e) { /* rede instável, tenta de novo */ }
+
+    var tentativa = i + 1;
+    document.getElementById('loading-msg').textContent =
+      'Aguardando conversão para MP4… (' + tentativa + '/' + maxTries + ')';
+    await new Promise(function(res) { setTimeout(res, intervalo); });
+  }
+  // Se não ficou pronto no tempo limite, retorna mesmo assim (Instagram pode tentar)
+  console.warn('[Cloudinary] URL pode ainda não estar pronta:', url);
 }
 
 function exportarCardParaDrive(index) {
