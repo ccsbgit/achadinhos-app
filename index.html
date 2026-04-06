@@ -97,6 +97,23 @@
     }
     .badge-capa       { background: #2a1a2a; color: #c678dd; }
     .badge-tela-final { background: #1a1a2a; color: #61afef; }
+    .badge-video      { background: #1a1a1a; color: var(--warn); border: 1px solid var(--warn); font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+    .card-video-preview {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    /* Aviso de vídeo no editor */
+    #editor-video-notice {
+      display: none; flex-direction: column; align-items: center;
+      justify-content: center; gap: 20px;
+      grid-column: 1 / -1; padding: 40px 20px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); text-align: center;
+    }
+    #editor-video-preview {
+      max-width: 280px; width: 100%; border-radius: 10px;
+      border: 2px solid var(--border);
+    }
     .card-header-actions { display: none; align-items: center; gap: 4px; }
     .card-header-actions.visivel { display: flex; }
     .btn-card-action {
@@ -736,6 +753,18 @@
     </div>
   </div>
 
+  <!-- Aviso para cards de vídeo no editor (substitui canvas + toolbar) -->
+  <div id="editor-video-notice">
+    <video id="editor-video-preview" controls muted playsinline></video>
+    <div>
+      <p style="color:var(--text);font-size:15px;font-weight:700;margin-bottom:6px">🎬 Card de Vídeo</p>
+      <p style="color:var(--muted);font-size:13px;line-height:1.6">
+        Edição de texto sobre vídeo será disponível em breve.<br>
+        Use os botões ◀ ▶ para navegar entre cards.
+      </p>
+    </div>
+  </div>
+
   <div class="legenda-area">
     <label>Legenda do post (compartilhada em todos os cards)</label>
     <textarea id="textarea-legenda" placeholder="Digite aqui a legenda do post no Instagram…"></textarea>
@@ -765,6 +794,8 @@
       </div>
       <div class="ig-imagem-container">
         <img id="ig-preview-img" src="" alt="Preview do card">
+        <video id="ig-preview-video" muted playsinline loop autoplay
+          style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none"></video>
         <button class="ig-nav" id="ig-prev">‹</button>
         <button class="ig-nav" id="ig-next">›</button>
         <div class="ig-dots" id="ig-dots"></div>
@@ -1178,7 +1209,7 @@ function setupTela1() {
 }
 
 function novoCard(tipo) {
-  return { tipo: tipo || 'produto', itemId: null, nome: '',
+  return { tipo: tipo || 'produto', mediaType: 'imagem', itemId: null, nome: '',
            imagemDataUrl: null, imagemBase64: null, mimeType: null,
            driveUrl: null, canvasObjects: [], imagemExportadaBase64: null,
            isFallback: false, imagemOriginalUrl: null };
@@ -1320,12 +1351,13 @@ function criarCardElement(i) {
     '</div>' +
     '<div class="card-img-area" id="img-area-' + i + '">' +
       '<img id="card-img-' + i + '" class="card-preview" style="display:none" alt="">' +
+      '<video id="card-vid-' + i + '" class="card-video-preview" style="display:none" muted playsinline loop autoplay></video>' +
       '<div class="card-placeholder" id="placeholder-' + i + '">' +
         '<div class="placeholder-icon">' + placeholderIcon + '</div>' +
         '<div class="placeholder-text">' + placeholderText + '</div>' +
         '<div class="placeholder-hint">Ctrl+V · Selecionar arquivo</div>' +
       '</div>' +
-      '<input type="file" id="file-' + i + '" accept="image/*" style="display:none">' +
+      '<input type="file" id="file-' + i + '" accept="image/*,video/*" style="display:none">' +
     '</div>' +
     '<div class="card-footer">' + footer + '</div>';
 
@@ -1333,7 +1365,7 @@ function criarCardElement(i) {
   (function(idx, t) {
     div.querySelector('#img-area-' + idx).addEventListener('click', function() { ativarCard(idx); });
     div.querySelector('#file-' + idx).addEventListener('change', function(e) {
-      if (e.target.files[0]) processarImagem(e.target.files[0], idx);
+      if (e.target.files[0]) processarArquivo(e.target.files[0], idx);
     });
     div.querySelector('#btn-arquivo-' + idx).addEventListener('click', function(e) {
       e.stopPropagation();
@@ -1378,6 +1410,19 @@ function handlePaste(e) {
   }
 }
 
+function processarArquivo(file, cardIndex) {
+  if (file.type.startsWith('video/')) {
+    var MAX_VIDEO_MB = 100;
+    if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+      showToast('Vídeo muito grande (máx ' + MAX_VIDEO_MB + ' MB). Comprima antes de usar.', 'warn');
+      return;
+    }
+    processarVideo(file, cardIndex);
+  } else {
+    processarImagem(file, cardIndex);
+  }
+}
+
 function processarImagem(file, cardIndex) {
   var reader = new FileReader();
   reader.onload = function(e) {
@@ -1392,16 +1437,77 @@ function processarImagem(file, cardIndex) {
   reader.readAsDataURL(file);
 }
 
+function processarVideo(file, cardIndex) {
+  showLoading('Carregando vídeo…');
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    hideLoading();
+    var dataUrl  = e.target.result;
+    var base64   = dataUrl.split(',')[1];
+    var mimeType = file.type || 'video/mp4';
+    App.cards[cardIndex].imagemOriginalUrl = null;
+    setCardVideo(cardIndex, dataUrl, base64, mimeType);
+    showToast('🎬 Vídeo definido no Card ' + (cardIndex + 1) + '.', 'success');
+  };
+  reader.onerror = function() {
+    hideLoading();
+    showToast('Erro ao ler o vídeo. Tente novamente.', 'error');
+  };
+  reader.readAsDataURL(file);
+}
+
+function setCardVideo(cardIndex, dataUrl, base64, mimeType) {
+  App.cards[cardIndex].imagemDataUrl        = dataUrl;
+  App.cards[cardIndex].imagemBase64         = base64;
+  App.cards[cardIndex].mimeType             = mimeType;
+  App.cards[cardIndex].mediaType            = 'video';
+  App.cards[cardIndex].imagemExportadaBase64 = null;  // vídeo não passa pelo canvas
+
+  var img         = document.getElementById('card-img-' + cardIndex);
+  var vid         = document.getElementById('card-vid-' + cardIndex);
+  var placeholder = document.getElementById('placeholder-' + cardIndex);
+  var dot         = document.getElementById('dot-' + cardIndex);
+  var actions     = document.getElementById('actions-' + cardIndex);
+
+  // Esconde imagem estática, mostra vídeo
+  if (img) { img.src = ''; img.style.display = 'none'; }
+  if (vid) {
+    vid.src = dataUrl;
+    vid.style.display = 'block';
+    vid.load();
+  }
+  placeholder.style.display = 'none';
+  if (dot)     { dot.textContent = '●'; dot.classList.add('ok'); }
+  if (actions) { actions.classList.add('visivel'); }
+
+  // Badge 🎬 no número do card
+  var numero = document.querySelector('#card-' + cardIndex + ' .card-numero');
+  if (numero && !numero.querySelector('.badge-video')) {
+    var b = document.createElement('span');
+    b.className = 'badge-video';
+    b.textContent = '🎬';
+    b.title = 'Card de vídeo';
+    numero.appendChild(b);
+  }
+
+  verificarBotaoAvancar();
+}
+
 function setCardImage(cardIndex, dataUrl, base64, mimeType) {
   App.cards[cardIndex].imagemDataUrl = dataUrl;
   App.cards[cardIndex].imagemBase64  = base64;
   App.cards[cardIndex].mimeType      = mimeType;
+  App.cards[cardIndex].mediaType     = 'imagem';
 
   var img         = document.getElementById('card-img-' + cardIndex);
+  var vid         = document.getElementById('card-vid-' + cardIndex);
   var placeholder = document.getElementById('placeholder-' + cardIndex);
   var dot         = document.getElementById('dot-' + cardIndex);
   var actions     = document.getElementById('actions-' + cardIndex);
   var numero      = document.querySelector('#card-' + cardIndex + ' .card-numero');
+
+  // Esconde vídeo se havia um
+  if (vid) { vid.src = ''; vid.style.display = 'none'; }
 
   img.src = dataUrl;
   img.style.display = 'block';
@@ -1432,20 +1538,27 @@ function limparImagem(cardIndex) {
   App.cards[cardIndex].imagemDataUrl    = null;
   App.cards[cardIndex].imagemBase64     = null;
   App.cards[cardIndex].mimeType         = null;
+  App.cards[cardIndex].mediaType        = 'imagem';
   App.cards[cardIndex].isFallback       = false;
   App.cards[cardIndex].imagemOriginalUrl = null;
+  App.cards[cardIndex].imagemExportadaBase64 = null;
 
   var img         = document.getElementById('card-img-' + cardIndex);
+  var vid         = document.getElementById('card-vid-' + cardIndex);
   var placeholder = document.getElementById('placeholder-' + cardIndex);
   var dot         = document.getElementById('dot-' + cardIndex);
   var actions     = document.getElementById('actions-' + cardIndex);
   var numero      = document.querySelector('#card-' + cardIndex + ' .card-numero');
 
   img.src = ''; img.style.display = 'none';
+  if (vid) { vid.src = ''; vid.style.display = 'none'; }
   placeholder.style.display = 'flex';
   if (dot)     { dot.textContent = '○'; dot.classList.remove('ok'); }
   if (actions) { actions.classList.remove('visivel'); }
-  if (numero)  { var b = numero.querySelector('.badge-fallback'); if (b) b.remove(); }
+  if (numero)  {
+    var b = numero.querySelector('.badge-fallback'); if (b) b.remove();
+    var bv = numero.querySelector('.badge-video');    if (bv) bv.remove();
+  }
 
   // Limpa o searchable select para cards de produto
   var ssInput = document.getElementById('ss-input-' + cardIndex);
@@ -2065,6 +2178,31 @@ function carregarCardNoEditor(index) {
   document.getElementById('btn-card-prev').disabled = (index === 0);
   document.getElementById('btn-card-next').disabled = (index === App.numCards - 1);
 
+  var canvasWrapper  = document.querySelector('.canvas-wrapper');
+  var toolbar        = document.querySelector('.toolbar');
+  var videoNotice    = document.getElementById('editor-video-notice');
+  var videoPreviewEl = document.getElementById('editor-video-preview');
+
+  // Card de vídeo: esconde canvas/toolbar e mostra aviso
+  if (card.mediaType === 'video') {
+    if (canvasWrapper) canvasWrapper.style.display = 'none';
+    if (toolbar)       toolbar.style.display = 'none';
+    if (videoNotice)   videoNotice.style.display = 'flex';
+    if (videoPreviewEl && card.imagemDataUrl) {
+      videoPreviewEl.src = card.imagemDataUrl;
+      videoPreviewEl.load();
+    }
+    App.canvas.clear();
+    App.canvas.renderAll();
+    return;
+  }
+
+  // Card de imagem: garante que canvas/toolbar estejam visíveis
+  if (canvasWrapper) canvasWrapper.style.display = '';
+  if (toolbar)       toolbar.style.display = '';
+  if (videoNotice)   videoNotice.style.display = 'none';
+  if (videoPreviewEl) { videoPreviewEl.src = ''; }
+
   App.canvas.clear();
   App.canvas.setBackgroundColor('#000000', function() {});
 
@@ -2129,7 +2267,7 @@ async function salvarEContinuar() {
   // que o POST_PADRAO reflita exatamente o que foi usado — independente da origem.
   for (var fi = 0; fi < App.numCards; fi++) {
     var fc = App.cards[fi];
-    if (fc.tipo !== 'produto' || !fc.itemId || !fc.imagemBase64) continue;
+    if (fc.tipo !== 'produto' || fc.mediaType === 'video' || !fc.itemId || !fc.imagemBase64) continue;
     var canvasJson = JSON.stringify(fc.canvasObjects || []);
     try {
       showLoading('Salvando imagem do produto ' + (fi + 1) + '…');
@@ -2156,6 +2294,24 @@ async function salvarEContinuar() {
 function exportarCardParaDrive(index) {
   return new Promise(function(resolve, reject) {
     var card = App.cards[index];
+
+    // Card de vídeo: faz upload direto, sem canvas
+    if (card.mediaType === 'video') {
+      if (!card.imagemBase64) { reject(new Error('Vídeo sem dados no card ' + (index + 1))); return; }
+      var ext  = (card.mimeType || 'video/mp4').replace('video/', '') || 'mp4';
+      var nome = 'carrossel-video-card-' + (index + 1) + '-' + Date.now() + '.' + ext;
+      apiFetch('uploadImagemBase64', { base64Data: card.imagemBase64, mimeType: card.mimeType, nomeArquivo: nome })
+        .then(function(res) {
+          if (!res || !res.sucesso) throw new Error((res && res.erro) || 'Falha no upload do vídeo');
+          App.cards[index].driveUrl              = res.url;
+          App.cards[index].imagemExportadaBase64 = null; // vídeos não têm export canvas
+          resolve();
+        })
+        .catch(reject);
+      return;
+    }
+
+    // Card de imagem: renderização canvas → PNG
     App.canvas.clear();
     App.canvas.setBackgroundColor('#000000', function() {});
 
@@ -2266,15 +2422,29 @@ function inicializarPreview() {
 function mostrarPreviewCard(index) {
   var card = App.cards[index];
   var img  = document.getElementById('ig-preview-img');
+  var vid  = document.getElementById('ig-preview-video');
 
-  // Usa o base64 exportado (já em memória, sem CORS nem redirect do Drive)
-  // Fallback para a imagem original caso o export ainda não tenha ocorrido
-  if (card.imagemExportadaBase64) {
-    img.src = 'data:image/png;base64,' + card.imagemExportadaBase64;
-  } else if (card.imagemDataUrl) {
-    img.src = card.imagemDataUrl;
+  if (card.mediaType === 'video') {
+    // Mostra vídeo, esconde imagem
+    img.style.display = 'none'; img.src = '';
+    if (vid) {
+      vid.src = card.imagemDataUrl || '';
+      vid.style.display = '';
+      vid.load();
+    }
   } else {
-    img.src = '';
+    // Mostra imagem, esconde vídeo
+    if (vid) { vid.style.display = 'none'; vid.src = ''; }
+    img.style.display = '';
+    // Usa o base64 exportado (já em memória, sem CORS nem redirect do Drive)
+    // Fallback para a imagem original caso o export ainda não tenha ocorrido
+    if (card.imagemExportadaBase64) {
+      img.src = 'data:image/png;base64,' + card.imagemExportadaBase64;
+    } else if (card.imagemDataUrl) {
+      img.src = card.imagemDataUrl;
+    } else {
+      img.src = '';
+    }
   }
 
   document.querySelectorAll('#ig-dots .dot').forEach(function(d, i) {
@@ -2296,18 +2466,35 @@ function navegarPreview(direcao) {
 
 function downloadTodosCards() {
   var baixados = 0;
+  var total    = App.cards.length;
   App.cards.forEach(function(card, i) {
+    // Vídeos: baixar o arquivo original
+    if (card.mediaType === 'video' && card.imagemDataUrl) {
+      setTimeout(function() {
+        var ext = (card.mimeType || 'video/mp4').replace('video/', '') || 'mp4';
+        var a   = document.createElement('a');
+        a.href     = card.imagemDataUrl;
+        a.download = 'carrossel-video-' + (i + 1) + '.' + ext;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        baixados++;
+        if (baixados === total) showToast(total + ' cards baixados!', 'success');
+      }, i * 600);
+      return;
+    }
+    // Imagens: base64 exportado do canvas
     var b64 = card.imagemExportadaBase64;
-    if (!b64) return;
+    if (!b64) { baixados++; return; }
     setTimeout(function() {
       var a = document.createElement('a');
-      a.href = 'data:image/png;base64,' + b64;
+      a.href     = 'data:image/png;base64,' + b64;
       a.download = 'carrossel-card-' + (i + 1) + '.png';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       baixados++;
-      if (baixados === App.cards.length) showToast(App.numCards + ' cards baixados!', 'success');
+      if (baixados === total) showToast(total + ' cards baixados!', 'success');
     }, i * 600);
   });
 }
@@ -2331,6 +2518,7 @@ async function agendarPostagem() {
     cards_json:  App.cards.map(function(c) {
       return {
         tipo:                c.tipo,
+        mediaType:           c.mediaType || 'imagem',
         item_id:             c.itemId,
         nome:                c.nome,
         imagem_url:          c.driveUrl,
@@ -2725,9 +2913,10 @@ async function carregarPostParaEdicao(post) {
   savedCards.forEach(function(sc) {
     var tipo = sc.tipo || 'produto';
     var card = novoCard(tipo);
-    card.itemId            = sc.item_id            || null;
-    card.nome              = sc.nome               || '';
-    card.driveUrl          = sc.imagem_url          || null;
+    card.mediaType         = sc.mediaType           || 'imagem';
+    card.itemId            = sc.item_id             || null;
+    card.nome              = sc.nome                || '';
+    card.driveUrl          = sc.imagem_url           || null;
     card.imagemOriginalUrl = sc.imagem_original_url || sc.imagem_url || null;
     try {
       card.canvasObjects = sc.canvas_objects
