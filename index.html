@@ -1750,6 +1750,7 @@ function irParaTela2() {
 }
 
 function inicializarEditor() {
+  // Recria o canvas a cada sessão (necessário após dispose)
   if (App.canvas) { App.canvas.dispose(); App.canvas = null; }
 
   App.canvas = new fabric.Canvas('fabric-canvas', {
@@ -1758,19 +1759,24 @@ function inicializarEditor() {
     preserveObjectStacking: true
   });
 
-  setupToolbar();
+  // Event listeners adicionados UMA ÚNICA VEZ — nunca duplicados entre sessões
+  if (!App._editorListenersOk) {
+    setupToolbar();
 
-  document.getElementById('btn-card-prev').addEventListener('click', function() { navegarCardEditor(-1); });
-  document.getElementById('btn-card-next').addEventListener('click', function() { navegarCardEditor(1); });
+    document.getElementById('btn-card-prev').addEventListener('click', function() { navegarCardEditor(-1); });
+    document.getElementById('btn-card-next').addEventListener('click', function() { navegarCardEditor(1); });
 
-  function voltarT1() {
-    salvarEstadoCardAtual();
-    App.legenda = document.getElementById('textarea-legenda').value;
-    showTela(1);
+    function voltarT1() {
+      salvarEstadoCardAtual();
+      App.legenda = document.getElementById('textarea-legenda').value;
+      showTela(1);
+    }
+    document.getElementById('btn-voltar-t1').addEventListener('click', voltarT1);
+    document.getElementById('btn-voltar-t1-footer').addEventListener('click', voltarT1);
+    document.getElementById('btn-salvar-continuar').addEventListener('click', salvarEContinuar);
+
+    App._editorListenersOk = true;
   }
-  document.getElementById('btn-voltar-t1').addEventListener('click', voltarT1);
-  document.getElementById('btn-voltar-t1-footer').addEventListener('click', voltarT1);
-  document.getElementById('btn-salvar-continuar').addEventListener('click', salvarEContinuar);
 
   document.getElementById('textarea-legenda').value = App.legenda || App.legendaPadrao || '';
 
